@@ -5,13 +5,16 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
-import com.saeidkazemi.trader.ui.MainScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.saeidkazemi.trader.ui.AppRoot
 import com.saeidkazemi.trader.ui.theme.TraderTheme
+import com.saeidkazemi.trader.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -28,7 +31,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             TraderTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    MainScreen()
+                    val vm: MainViewModel = viewModel()
+                    AppRoot(
+                        controller = vm.controller,
+                        backHandler = { enabled, onBack -> BackHandler(enabled = enabled, onBack = onBack) }
+                    )
                 }
             }
         }

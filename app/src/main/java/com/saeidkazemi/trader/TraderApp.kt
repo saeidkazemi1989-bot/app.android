@@ -14,7 +14,7 @@ class TraderApp : Application() {
         super.onCreate()
         instance = this
         createNotificationChannels()
-        container = AppContainer(this)
+        container = AppContainer(filesDir)
     }
 
     private fun createNotificationChannels() {

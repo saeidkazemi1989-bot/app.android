@@ -21,4 +21,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "MoameleYar"
+include(":core")
 include(":app")
+include(":desktop")

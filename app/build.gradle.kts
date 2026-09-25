@@ -12,8 +12,8 @@ android {
         applicationId = "com.saeidkazemi.trader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     buildTypes {
@@ -35,6 +35,19 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // صفحه‌های رابط کاربری بین اندروید و ویندوز مشترک‌اند (پوشه ui-shared).
+    sourceSets {
+        getByName("main") {
+            java.srcDir("../ui-shared/kotlin")
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += setOf("META-INF/versions/9/previous-compilation-data.bin")
+        }
+    }
 }
 
 dependencies {
@@ -48,12 +61,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.compose.material.icons.core)
 
-    implementation(libs.retrofit)
-    implementation(libs.converter.gson)
-    implementation(libs.okhttp)
-    implementation(libs.gson)
+    implementation(project(":core"))
     implementation(libs.kotlinx.coroutines.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
