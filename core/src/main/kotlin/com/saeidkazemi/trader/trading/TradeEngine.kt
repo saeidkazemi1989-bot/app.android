@@ -14,7 +14,14 @@ import com.saeidkazemi.trader.data.remote.MarketDataService
 import com.saeidkazemi.trader.data.remote.RefreshResult
 import com.saeidkazemi.trader.news.NewsDigest
 import com.saeidkazemi.trader.news.NewsService
+import com.saeidkazemi.trader.data.model.AppSettings
 import com.saeidkazemi.trader.util.Format
+import com.saeidkazemi.trader.util.IranMarket
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.sync.Mutex
@@ -39,6 +46,27 @@ class TradeEngine(
     companion object {
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
+
+        /** حداکثر تاریخچه جدید سهام بورس در هر دور (بقیه در دورهای بعد؛ کل بازار ظرف چند دقیقه پوشش داده می‌شود). */
+        const val IR_HISTORY_PER_CYCLE = 60
+
+        /** تعداد درخواست هم‌زمان تاریخچه. */
+        const val HISTORY_PARALLELISM = 6
+    }
+
+    /** کارمزد واقعی هر بازار: سهام ایران کارمزد و مالیات خودش را دارد؛ بقیه طبق تنظیمات. */
+    private fun feeFor(asset: Asset?, kind: MarketKind?, buy: Boolean, settings: AppSettings): Double =
+        if ((asset?.market ?: kind) == MarketKind.IR_STOCK) {
+            if (buy) IranMarket.BUY_FEE else IranMarket.SELL_FEE
+        } else settings.feePct
+
+    /** دلیل ممنوعیت معامله سهام در این لحظه (بسته بودن بازار یا صف)، یا null اگر مجاز است. */
+    private fun irBlock(asset: Asset, buy: Boolean): String? {
+        if (asset.market != MarketKind.IR_STOCK) return null
+        if (!IranMarket.isOpen()) return "بازار بورس بسته است (شنبه تا چهارشنبه ۹:۰۰ تا ۱۲:۳۰)"
+        if (buy && asset.buyQueue) return "نماد " + asset.symbol + " در صف خرید است"
+        if (!buy && asset.sellQueue) return "نماد " + asset.symbol + " در صف فروش است"
+        return null
     }
 
     private val mutex = Mutex()
@@ -59,29 +87,61 @@ class TradeEngine(
         val sells = mutableListOf<String>()
         val notes = mutableListOf<String>()
 
+        val heldIds = broker.account().positions.map { it.assetId }.toSet()
         val result = try {
-            market.refresh(settings)
+            market.refresh(settings, heldIds)
         } catch (e: Exception) {
             notes.add("خطا در به‌روزرسانی بازار: " + (e.message ?: ""))
             RefreshResult(market.cachedAssets(), emptyList())
         }
         notes.addAll(result.notes)
         val assets = result.assets
+        if (!IranMarket.isOpen() && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
+            notes.add("بازار بورس الان بسته است؛ سهام تحلیل می‌شوند ولی خرید و فروش آن‌ها فقط در ساعت کار بازار (شنبه تا چهارشنبه ۹ تا ۱۲:۳۰) انجام می‌شود.")
+        }
         val usdIrr = market.usdIrr(settings)
 
         // ۱) تحلیل تکنیکال همه دارایی‌های دارای داده کافی
         val histories = HashMap<String, List<PricePoint>>()
         val technical = mutableListOf<Signal>()
-        for (asset in assets) {
-            if (asset.isDisplayOnly) continue
-            val hist = try {
-                market.historyFor(asset)
-            } catch (e: Exception) {
-                emptyList()
-            }
+        val analyzable = assets.filter { !it.isDisplayOnly }
+        // سهام بورس: تاریخچه تازه‌نشده‌ها به ترتیب نقدشوندگی و حداکثر IR_HISTORY_PER_CYCLE مورد در هر دور.
+        val irPending = analyzable
+            .filter { it.market == MarketKind.IR_STOCK && !it.isSimulated && !market.hasFreshHistory(it) }
+            .sortedWith(compareBy<Asset> { it.id !in heldIds }.thenBy { it.rank ?: Int.MAX_VALUE })
+        val deferred = irPending.drop(IR_HISTORY_PER_CYCLE).map { it.id }.toSet()
+        val sem = Semaphore(HISTORY_PARALLELISM)
+        val fetched = coroutineScope {
+            analyzable.filter { it.id !in deferred }.map { asset ->
+                async {
+                    sem.withPermit {
+                        val h: List<PricePoint> = try {
+                            market.historyFor(asset)
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                        asset to h
+                    }
+                }
+            }.awaitAll()
+        }
+        for ((asset, hist) in fetched) {
             histories[asset.id] = hist
             val sig = strategy.analyze(asset, hist, settings, null) ?: continue
             technical.add(sig)
+        }
+        if (deferred.isNotEmpty()) {
+            notes.add("تحلیل " + deferred.size + " سهم دیگر در دورهای بعدی انجام می‌شود (پویش تدریجی کل بازار).")
+        }
+
+        // اصلاح موقعیت‌های سهام پس از افزایش سرمایه/تقسیم سود (تا افت قیمت پس از مجمع، زیان کاذب یا حد ضرر نسازد).
+        for (pos in broker.account().positions) {
+            if (pos.market != MarketKind.IR_STOCK) continue
+            val (day, factor) = market.iranAdjustment(pos.assetId) ?: continue
+            if (pos.openedAt >= IranMarket.dayStartMs(day)) continue
+            if (broker.adjustPosition(pos.assetId, factor, day)) {
+                notes.add("موقعیت " + pos.symbol + " بابت افزایش سرمایه/تقسیم سود تعدیل شد (ضریب " + Format.num(factor, 3) + ").")
+            }
         }
         technical.sortByDescending { it.score }
         val noHistory = assets.count {
@@ -147,7 +207,12 @@ class TradeEngine(
                 else -> null
             }
             if (reason != null) {
-                val trade = broker.sell(pos.assetId, curUsd, settings.feePct, reason)
+                val blocked = irBlock(asset, buy = false)
+                if (blocked != null) {
+                    if (IranMarket.isOpen()) notes.add("فروش " + pos.symbol + " (" + reason + ") ممکن نشد: " + blocked + ".")
+                    continue
+                }
+                val trade = broker.sell(pos.assetId, curUsd, feeFor(asset, null, false, settings), reason)
                 if (trade != null) {
                     sells.add(pos.symbol)
                     maybeRealSell(settings, asset, pos.qty, notes)
@@ -172,6 +237,8 @@ class TradeEngine(
                 val asset = assets.firstOrNull { it.id == sig.assetId } ?: continue
                 // روی داده شبیه‌سازی‌شده خودکار خرید نمی‌شود تا سود/زیان دمو واقعی بماند.
                 if (asset.isSimulated) continue
+                // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
+                if (irBlock(asset, buy = true) != null) continue
                 val usdPrice = priceMap[asset.id] ?: continue
                 if (!usdPrice.isFinite() || usdPrice <= 0) continue
                 val budget = equity * plan.positionPct
@@ -184,7 +251,7 @@ class TradeEngine(
                     asset = asset,
                     usdPrice = usdPrice,
                     usdAmount = amount,
-                    feePct = settings.feePct,
+                    feePct = feeFor(asset, null, true, settings),
                     stopLossUsd = usdPrice * (1 - plan.stopPct),
                     takeProfitUsd = usdPrice * (1 + plan.tpPct),
                     reason = reason
@@ -223,6 +290,7 @@ class TradeEngine(
         val asset = market.cachedAssets().firstOrNull { it.id == assetId }
             ?: return "دارایی پیدا نشد؛ ابتدا بازار را به‌روزرسانی کنید."
         if (asset.isDisplayOnly) return "این دارایی فقط نمایشی است و معامله نمی‌شود."
+        irBlock(asset, buy = true)?.let { return "خرید ممکن نیست: " + it + "." }
         val usdPrice = market.usdPriceOf(asset, settings)
         if (!usdPrice.isFinite() || usdPrice <= 0) return "قیمت معتبر در دسترس نیست."
         val account = broker.account()
@@ -233,7 +301,7 @@ class TradeEngine(
             asset = asset,
             usdPrice = usdPrice,
             usdAmount = usdAmount,
-            feePct = settings.feePct,
+            feePct = feeFor(asset, null, true, settings),
             stopLossUsd = usdPrice * (1 - plan.stopPct),
             takeProfitUsd = usdPrice * (1 + plan.tpPct),
             reason = "خرید دستی"
@@ -253,7 +321,8 @@ class TradeEngine(
             ?: return "موقعیتی برای فروش ندارید."
         val asset = market.cachedAssets().firstOrNull { it.id == assetId }
         val usdPrice = if (asset != null) market.usdPriceOf(asset, settings) else pos.avgBuyUsd
-        val trade = broker.sell(assetId, usdPrice, settings.feePct, "فروش دستی")
+        if (asset != null) irBlock(asset, buy = false)?.let { return "فروش ممکن نیست: " + it + "." }
+        val trade = broker.sell(assetId, usdPrice, feeFor(asset, pos.market, false, settings), "فروش دستی")
             ?: return "فروش انجام نشد."
         if (settings.realTrading && asset != null) {
             val notes = mutableListOf<String>()

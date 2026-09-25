@@ -119,5 +119,27 @@ class PaperBroker(private val store: JsonStore) : Broker {
             trade
         }
 
+    /**
+     * اصلاح موقعیت پس از افزایش سرمایه/تقسیم سود: قیمت با ضریب factor کم شده، پس تعداد سهم زیاد می‌شود
+     * و ارزش موقعیت ثابت می‌ماند (حد ضرر و حد سود هم به همان نسبت جابه‌جا می‌شوند).
+     */
+    fun adjustPosition(assetId: String, factor: Double, day: Int): Boolean = synchronized(lock) {
+        if (!factor.isFinite() || factor <= 0.1 || factor >= 1.5) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if ((pos.adjDay ?: 0) >= day) return@synchronized false
+        val adjusted = pos.copy(
+            qty = pos.qty / factor,
+            avgBuyUsd = pos.avgBuyUsd * factor,
+            stopLossUsd = pos.stopLossUsd * factor,
+            takeProfitUsd = pos.takeProfitUsd * factor,
+            adjDay = day
+        )
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) adjusted else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
     private fun shortId(): String = UUID.randomUUID().toString().replace("-", "").take(10)
 }

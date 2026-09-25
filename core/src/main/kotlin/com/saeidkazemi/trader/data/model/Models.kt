@@ -21,7 +21,13 @@ data class Asset(
     val isSimulated: Boolean = false,
     val isDisplayOnly: Boolean = false,
     val rank: Int? = null,
-    val nobitexSymbol: String? = null
+    val nobitexSymbol: String? = null,
+    /** بورس تهران: نماد در صف خرید است (خرید عملاً ممکن نیست). */
+    val buyQueue: Boolean = false,
+    /** بورس تهران: نماد در صف فروش است (فروش عملاً ممکن نیست). */
+    val sellQueue: Boolean = false,
+    /** ارزش معاملات امروز به ارز پایه (برای سهام: ریال). */
+    val tradeValue: Double? = null
 )
 
 /** یک نقطه از تاریخچه قیمت (زمان به میلی‌ثانیه). */
@@ -72,7 +78,9 @@ data class Position(
     val avgBuyUsd: Double,
     val openedAt: Long,
     val stopLossUsd: Double,
-    val takeProfitUsd: Double
+    val takeProfitUsd: Double,
+    /** آخرین روز (yyyymmdd) که بابت افزایش سرمایه/سود نقدی تعدیل شد. */
+    val adjDay: Int? = null
 )
 
 /** یک معامله انجام‌شده (دمو یا واقعی). */

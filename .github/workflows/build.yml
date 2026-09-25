@@ -104,7 +104,7 @@ jobs:
           if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(assets=|signals=|historyError|news |screenshot .*FAILED|SELFTEST CRASH|exit=|positions=)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(iranScan|signals=|news ir|screenshot .*FAILED|SELFTEST CRASH|exit=|positions=|  IR |historyError ir)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
       - uses: actions/upload-artifact@v4
         if: always()

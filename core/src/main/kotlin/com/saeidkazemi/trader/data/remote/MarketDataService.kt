@@ -55,7 +55,23 @@ class MarketDataService {
 
     fun tomanPerUsd(settings: AppSettings): Double = usdIrr(settings) / 10.0
 
-    suspend fun refresh(settings: AppSettings): RefreshResult {
+    /** آمار آخرین پویش کل بازار بورس (برای نمایش). */
+    @Volatile
+    var lastIranScan: IranStockSource.ScanResult? = null
+        private set
+
+    fun iranQuote(assetId: String): IranStockSource.Quote? = iranSource.quote(assetId)
+
+    fun iranAdjustment(assetId: String): Pair<Int, Double>? = iranSource.adjustmentFor(assetId)
+
+    /** آیا تاریخچه تازه این دارایی در کش هست (بدون درخواست شبکه)؟ */
+    fun hasFreshHistory(asset: Asset): Boolean {
+        val c = historyCache[asset.id] ?: return false
+        val ttl = if (c.points.isEmpty()) 10 * 60_000L else 3 * 3_600_000L
+        return System.currentTimeMillis() - c.ts < ttl
+    }
+
+    suspend fun refresh(settings: AppSettings, mustInclude: Set<String> = emptySet()): RefreshResult {
         val notes = mutableListOf<String>()
 
         val cryptoAssets = try {
@@ -73,13 +89,22 @@ class MarketDataService {
         }
 
         val iranAssets = try {
-            iranSource.assets()
+            val scan = iranSource.scan(mustInclude)
+            lastIranScan = scan
+            if (scan.live) {
+                notes.add(
+                    "بورس و فرابورس: " + scan.stocks + " سهم پویش شد؛ " + scan.liquid +
+                        " سهم با ارزش معاملات بالای ۱ میلیارد تومان وارد تحلیل شد" +
+                        (if (scan.buyQueues + scan.sellQueues > 0) " (صف خرید: " + scan.buyQueues + "، صف فروش: " + scan.sellQueues + ")" else "") + "."
+                )
+                if (iranSource.lastError != null) notes.add("دیده‌بان بازار به‌روز نشد؛ آخرین داده دریافتی استفاده می‌شود.")
+            } else {
+                notes.add("داده بورس تهران (TSETMC) در دسترس نبود؛ ۱۰ نماد شاخص با قیمت شبیه‌سازی‌شده (با برچسب) نمایش داده می‌شود و روی آن‌ها معامله خودکار انجام نمی‌شود.")
+            }
+            scan.assets
         } catch (e: Exception) {
             notes.add("داده بورس تهران در دسترس نیست.")
             emptyList()
-        }
-        if (iranAssets.all { it.isSimulated } && iranAssets.isNotEmpty()) {
-            notes.add("داده بورس تهران در دسترس نبود؛ قیمت‌های شبیه‌سازی‌شده (با برچسب) نمایش داده می‌شود.")
         }
 
         try {

@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -114,6 +115,14 @@ private fun MarketRow(asset: Asset, onClick: () -> Unit) {
                 }
                 Spacer(Modifier.width(6.dp))
                 MarketChip(asset.market.faTitle)
+                if (asset.buyQueue) {
+                    Spacer(Modifier.width(6.dp))
+                    QueueChip("صف خرید", Color(0xFF26DE81))
+                }
+                if (asset.sellQueue) {
+                    Spacer(Modifier.width(6.dp))
+                    QueueChip("صف فروش", Color(0xFFFF6B6B))
+                }
             }
             Text(
                 asset.name,
@@ -121,6 +130,15 @@ private fun MarketRow(asset: Asset, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 3.dp)
             )
+            val value = asset.tradeValue
+            if (asset.market == MarketKind.IR_STOCK && value != null && value > 0) {
+                Text(
+                    "ارزش معاملات امروز: " + Format.compactIrr(value / 10.0).let { if (it.endsWith("همت")) it else "$it تومان" },
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             val priceText = if (asset.baseCurrency == "IRR") {
@@ -140,4 +158,14 @@ private fun MarketRow(asset: Asset, onClick: () -> Unit) {
     }
 }
 
-
+@Composable
+private fun QueueChip(text: String, color: Color) {
+    Text(
+        text,
+        fontSize = 10.sp,
+        color = color,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    )
+}

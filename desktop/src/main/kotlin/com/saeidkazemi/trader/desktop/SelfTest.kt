@@ -66,6 +66,12 @@ fun runSelfTest(outDir: File): Int {
             out("  $k: ${list.size} (sim ${list.count { it.isSimulated }})")
         }
         out("usdIrr=${st.usdIrr} fallback=${st.rateIsFallback}")
+        container.marketDataService.lastIranScan?.let { sc ->
+            out("iranScan live=${sc.live} scanned=${sc.scanned} stocks=${sc.stocks} liquid=${sc.liquid} buyQ=${sc.buyQueues} sellQ=${sc.sellQueues}")
+        }
+        st.signals.filter { it.market == MarketKind.IR_STOCK }.take(5).forEach {
+            out("  IR ${it.symbol} score=${it.score} tech=${it.technicalScore} ${it.action}")
+        }
         out("cycle=${st.lastCycle?.summary()}")
         st.notes.forEach { out("note: $it") }
         out("signals=${st.signals.size} crypto=${st.signals.count { it.market == MarketKind.CRYPTO }} fx=${st.signals.count { it.market == MarketKind.FX }} ir=${st.signals.count { it.market == MarketKind.IR_STOCK }}")
