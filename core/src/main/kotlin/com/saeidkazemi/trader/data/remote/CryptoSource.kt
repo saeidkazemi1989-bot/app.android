@@ -3,6 +3,10 @@ package com.saeidkazemi.trader.data.remote
 import com.saeidkazemi.trader.data.model.Asset
 import com.saeidkazemi.trader.data.model.MarketKind
 import com.saeidkazemi.trader.data.model.PricePoint
+import com.google.gson.JsonParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -64,7 +68,14 @@ class CryptoSource {
     )
 
     companion object {
-        const val HISTORY_LIMIT = 12
+        /** تعداد ارزهای برتر که تاریخچه و سیگنال می‌گیرند (بقیه فقط نمایشی‌اند). */
+        const val HISTORY_LIMIT = 25
+
+        /** استیبل‌کوین‌ها و توکن‌های بسته‌بندی‌شده: قیمتشان تکرار دارایی دیگر است و معامله‌شان سودی ندارد. */
+        private val NON_TRADABLE = setOf(
+            "USDT", "USDC", "DAI", "FDUSD", "USDE", "TUSD", "PYUSD", "USDS", "BUSD", "USD1", "USDD", "USDTB", "BSC-USD",
+            "WBTC", "WETH", "STETH", "WSTETH", "WEETH", "CBBTC", "WBETH", "RETH", "METH", "LBTC", "SOLVBTC", "BUIDL"
+        )
     }
 
     suspend fun topAssets(limit: Int = 40): List<Asset> {
@@ -90,14 +101,79 @@ class CryptoSource {
                 changePct24h = c.price_change_percentage_24h,
                 updatedAt = now,
                 isSimulated = false,
-                isDisplayOnly = rank != null && rank > HISTORY_LIMIT,
+                isDisplayOnly = (rank != null && rank > HISTORY_LIMIT) ||
+                    (c.symbol ?: "").uppercase() in NON_TRADABLE,
                 rank = rank,
                 nobitexSymbol = nobitexMap[id]
             )
         }
     }
 
-    suspend fun history(coinId: String, days: Int = 90): List<PricePoint> {
+    /**
+     * تاریخچه روزانه قیمت (دلاری) با چند منبع پشت‌سرهم:
+     * ۱) نوبیتکس (بازار تتری، عمومی، ۶۰ درخواست در دقیقه — از ایران هم در دسترس)
+     * ۲) CryptoCompare  ۳) CoinGecko
+     */
+    suspend fun history(coinId: String, symbol: String, days: Int = 120): List<PricePoint> {
+        val errors = mutableListOf<String>()
+        for (src in listOf("nobitex", "cryptocompare", "coingecko")) {
+            try {
+                val h = when (src) {
+                    "nobitex" -> nobitexHistory(symbol, days)
+                    "cryptocompare" -> cryptoCompareHistory(symbol, days)
+                    else -> coinGeckoHistory(coinId, minOf(days, 90))
+                }
+                if (h.size >= 40) return h
+                errors.add("$src: ${h.size} points")
+            } catch (e: Exception) {
+                errors.add("$src: ${e.message}")
+            }
+        }
+        throw IllegalStateException("no history for $symbol (" + errors.joinToString("; ") + ")")
+    }
+
+    private suspend fun getJson(url: String): String = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url).header("Accept", "application/json").build()
+        Http.client.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            body
+        }
+    }
+
+    private suspend fun nobitexHistory(symbol: String, days: Int): List<PricePoint> {
+        val sym = symbol.uppercase().filter { it.isLetterOrDigit() }
+        if (sym.isEmpty() || sym == "USDT") return emptyList()
+        val to = System.currentTimeMillis() / 1000
+        val body = getJson(
+            "https://apiv2.nobitex.ir/market/udf/history?symbol=${sym}USDT&resolution=D&to=$to&countback=$days"
+        )
+        val root = JsonParser.parseString(body).asJsonObject
+        if (root.get("s")?.asString != "ok") return emptyList()
+        val t = root.getAsJsonArray("t") ?: return emptyList()
+        val c = root.getAsJsonArray("c") ?: return emptyList()
+        return (0 until minOf(t.size(), c.size())).mapNotNull { i ->
+            val price = c[i].asDouble
+            if (price.isFinite() && price > 0) PricePoint(t[i].asLong * 1000, price) else null
+        }.sortedBy { it.t }
+    }
+
+    private suspend fun cryptoCompareHistory(symbol: String, days: Int): List<PricePoint> {
+        val sym = symbol.uppercase().filter { it.isLetterOrDigit() }
+        if (sym.isEmpty()) return emptyList()
+        val body = getJson("https://min-api.cryptocompare.com/data/v2/histoday?fsym=$sym&tsym=USD&limit=$days")
+        val root = JsonParser.parseString(body).asJsonObject
+        if (root.get("Response")?.asString != "Success") return emptyList()
+        val arr = root.getAsJsonObject("Data")?.getAsJsonArray("Data") ?: return emptyList()
+        return arr.mapNotNull { el ->
+            val o = el.asJsonObject
+            val close = o.get("close")?.asDouble ?: return@mapNotNull null
+            val time = o.get("time")?.asLong ?: return@mapNotNull null
+            if (close.isFinite() && close > 0) PricePoint(time * 1000, close) else null
+        }
+    }
+
+    private suspend fun coinGeckoHistory(coinId: String, days: Int): List<PricePoint> {
         val chart = api.marketChart(id = coinId, days = days, interval = "daily")
         return chart.prices.orEmpty().mapNotNull { row ->
             if (row.size < 2) null else PricePoint(row[0].toLong(), row[1])

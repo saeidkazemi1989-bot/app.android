@@ -84,6 +84,12 @@ class TradeEngine(
             technical.add(sig)
         }
         technical.sortByDescending { it.score }
+        val noHistory = assets.count {
+            !it.isDisplayOnly && it.market == MarketKind.CRYPTO && (histories[it.id]?.size ?: 0) < StrategyEngine.MIN_HISTORY
+        }
+        if (noHistory > 0) {
+            notes.add("تاریخچه قیمت " + noHistory + " ارز دیجیتال دریافت نشد؛ این ارزها فعلاً تحلیل نمی‌شوند.")
+        }
 
         // ۲) بررسی اخبار برای بهترین فرصت‌ها + دارایی‌های داخل پرتفوی
         val digests = HashMap<String, NewsDigest>()
@@ -164,6 +170,8 @@ class TradeEngine(
                 if (broker.account().positions.any { it.assetId == sig.assetId }) continue
                 if (sells.contains(sig.symbol)) continue
                 val asset = assets.firstOrNull { it.id == sig.assetId } ?: continue
+                // روی داده شبیه‌سازی‌شده خودکار خرید نمی‌شود تا سود/زیان دمو واقعی بماند.
+                if (asset.isSimulated) continue
                 val usdPrice = priceMap[asset.id] ?: continue
                 if (!usdPrice.isFinite() || usdPrice <= 0) continue
                 val budget = equity * plan.positionPct

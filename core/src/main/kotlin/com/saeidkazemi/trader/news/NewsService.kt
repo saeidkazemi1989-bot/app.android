@@ -95,20 +95,23 @@ class NewsService(
                         )
                     )
                 }
-                collectGoogle("\"${asset.name}\" OR \"نماد ${asset.symbol}\"", true, items, ok, failed)
+                collectGoogle("\"${asset.name}\" OR \"نماد ${asset.symbol}\" when:14d", true, items, ok, failed)
             }
 
             MarketKind.CRYPTO -> collectGoogle(
-                "\"${asset.name}\" ${asset.symbol} crypto", false, items, ok, failed
+                "\"${asset.name}\" ${asset.symbol} crypto when:7d", false, items, ok, failed
             )
 
             MarketKind.FX -> {
                 val code = asset.id.removePrefix("fx:")
                 val name = fxNames[code] ?: code
-                collectGoogle("\"$name\" $code exchange rate", false, items, ok, failed)
+                collectGoogle(
+                    "(\"$code/USD\" OR \"USD/$code\" OR \"$name\") (forex OR \"central bank\" OR inflation OR currency) when:7d",
+                    false, items, ok, failed
+                )
             }
 
-            MarketKind.METAL -> collectGoogle("gold price", false, items, ok, failed)
+            MarketKind.METAL -> collectGoogle("\"gold price\" OR \"gold prices\" when:7d", false, items, ok, failed)
         }
 
         val dedup = items
@@ -117,6 +120,17 @@ class NewsService(
             .take(20)
         return summarize(asset, dedup, ok.distinct(), failed.distinct())
     }
+
+    /** صفحه‌های تبدیل قیمت و «پیش‌بینی قیمت» خبر نیستند و فقط نویز اضافه می‌کنند. */
+    private fun isJunk(title: String): Boolean {
+        val t = title.lowercase()
+        return JUNK.any { it in t }
+    }
+
+    private val JUNK = listOf(
+        "price today", "converter", "price prediction", "live price", "to usd price", "price chart",
+        "exchange rate today", "how to buy", "قیمت لحظه‌ای", "قیمت امروز"
+    )
 
     private fun collectGoogle(
         query: String,
@@ -128,7 +142,7 @@ class NewsService(
         try {
             val list = google.search(query, persian)
             ok.add(if (persian) "اخبار فارسی" else "اخبار جهانی")
-            for (e in list.take(15)) {
+            for (e in list.filterNot { isJunk(it.title) }.take(15)) {
                 val s = Sentiment.analyze(e.title + " " + e.description.take(200))
                 into.add(
                     NewsItem(

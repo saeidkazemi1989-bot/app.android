@@ -8,10 +8,21 @@ import java.util.concurrent.TimeUnit
 
 object Http {
 
+    /** نوبیتکس توصیه می‌کند بات‌ها خود را با الگوی TraderBot/<name-version> معرفی کنند. */
+    const val USER_AGENT = "TraderBot/MoameleYar-1.1.0"
+
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val req = chain.request()
+                if (req.header("User-Agent") == null) {
+                    chain.proceed(req.newBuilder().header("User-Agent", USER_AGENT).build())
+                } else {
+                    chain.proceed(req)
+                }
+            }
             .build()
     }
 

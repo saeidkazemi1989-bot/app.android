@@ -29,7 +29,12 @@ class MarketDataService {
     @Volatile
     private var lastRefreshTs: Long = 0L
 
-    private val historyCache = ConcurrentHashMap<String, List<PricePoint>>()
+    private class CachedHistory(val points: List<PricePoint>, val ts: Long)
+
+    private val historyCache = ConcurrentHashMap<String, CachedHistory>()
+
+    /** آخرین خطای دریافت تاریخچه هر دارایی (برای عیب‌یابی). */
+    val historyErrors = ConcurrentHashMap<String, String>()
 
     val lastRefresh: Long get() = lastRefreshTs
 
@@ -135,27 +140,29 @@ class MarketDataService {
         return RefreshResult(list, notes)
     }
 
-    /** تاریخچه قیمت برای تحلیل؛ نتیجه در طول عمر فرایند کش می‌شود. */
+    /**
+     * تاریخچه قیمت برای تحلیل. نتیجه موفق ۳ ساعت و شکست ۱۰ دقیقه کش می‌شود
+     * (تا برنامه‌ای که روزها روشن است داده کهنه نداشته باشد و منبع خراب هر دقیقه دوباره صدا زده نشود).
+     */
     suspend fun historyFor(asset: Asset): List<PricePoint> {
-        historyCache[asset.id]?.let { return it }
-        val h = when (asset.market) {
-            MarketKind.CRYPTO -> if (asset.isDisplayOnly) emptyList() else try {
-                cryptoSource.history(asset.id, 90)
-            } catch (e: Exception) {
-                emptyList()
-            }
-
-            MarketKind.FX -> try {
-                fxSource.history(asset.id.removePrefix("fx:"), 90)
-            } catch (e: Exception) {
-                emptyList()
-            }
-
-            MarketKind.IR_STOCK -> iranSource.history(asset)
-
-            MarketKind.METAL -> emptyList()
+        val now = System.currentTimeMillis()
+        historyCache[asset.id]?.let { c ->
+            val ttl = if (c.points.isEmpty()) 10 * 60_000L else 3 * 3_600_000L
+            if (now - c.ts < ttl) return c.points
         }
-        if (h.isNotEmpty()) historyCache[asset.id] = h
+        val h: List<PricePoint> = try {
+            when (asset.market) {
+                MarketKind.CRYPTO -> if (asset.isDisplayOnly) emptyList() else cryptoSource.history(asset.id, asset.symbol)
+                MarketKind.FX -> fxSource.history(asset.id.removePrefix("fx:"), 90)
+                MarketKind.IR_STOCK -> iranSource.history(asset)
+                MarketKind.METAL -> emptyList()
+            }
+        } catch (e: Exception) {
+            historyErrors[asset.id] = e.message ?: e.toString()
+            emptyList()
+        }
+        if (h.isNotEmpty()) historyErrors.remove(asset.id)
+        historyCache[asset.id] = CachedHistory(h, now)
         return h
     }
 }

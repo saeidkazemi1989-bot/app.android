@@ -68,8 +68,9 @@ fun runSelfTest(outDir: File): Int {
         out("usdIrr=${st.usdIrr} fallback=${st.rateIsFallback}")
         out("cycle=${st.lastCycle?.summary()}")
         st.notes.forEach { out("note: $it") }
-        out("signals=${st.signals.size}")
-        st.signals.take(8).forEach {
+        out("signals=${st.signals.size} crypto=${st.signals.count { it.market == MarketKind.CRYPTO }} fx=${st.signals.count { it.market == MarketKind.FX }} ir=${st.signals.count { it.market == MarketKind.IR_STOCK }}")
+        container.marketDataService.historyErrors.entries.take(6).forEach { out("historyError ${it.key}: ${it.value.take(200)}") }
+        st.signals.take(12).forEach {
             out("  ${it.symbol} score=${it.score} tech=${it.technicalScore} news=${it.newsAdj} (${it.newsCount}) ${it.action} blocked=${it.newsBlocked}")
         }
         out("positions=${st.account.positions.map { it.symbol }} cash=${st.account.cashUsd}")
