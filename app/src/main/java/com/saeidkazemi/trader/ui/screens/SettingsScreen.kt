@@ -133,7 +133,7 @@ fun SettingsScreen(state: UiState, vm: MainViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("فعال‌سازی معامله خودکار", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(
-                            "سرویس پس‌زمینه هر ۶۰ ثانیه بازار را بررسی کرده و طبق سیگنال‌ها خرید و فروش می‌کند.",
+                            "بدون تأیید موردی؛ هر ۶۰ ثانیه بازار را بررسی و طبق سیگنال‌ها خرید و فروش می‌کند. به‌صورت پیش‌فرض روشن است و فقط برای توقف موقت می‌توانید خاموشش کنید.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp)

@@ -129,7 +129,7 @@ fun DashboardScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("معامله‌گر خودکار", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "بررسی بازار، خرید و فروش خودکار هر ۶۰ ثانیه با رعایت حد ضرر و حد سود",
+                            text = "خرید و فروش کاملاً خودکار و بدون تأیید موردی، هر ۶۰ ثانیه، با رعایت حد ضرر و حد سود",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp)

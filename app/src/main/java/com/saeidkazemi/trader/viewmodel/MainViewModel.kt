@@ -27,6 +27,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val settings = container.store.loadSettings()
             val account = container.broker.account()
             _state.update { it.copy(settings = settings, account = account, loading = true) }
+            // معامله‌گر خودکار به‌صورت پیش‌فرض روشن است؛ سرویس با شروع اپ راه می‌افتد.
+            if (settings.autoTrade) {
+                TradingService.start(getApplication())
+            }
             runCycleInternal("initial")
         }
     }

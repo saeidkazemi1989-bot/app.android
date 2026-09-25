@@ -92,9 +92,9 @@ data class AccountState(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-/** تنظیمات کلی اپ. */
+/** تنظیمات کلی اپ. معامله خودکار به‌صورت پیش‌فرض روشن است (در حالت دمو، بدون تأیید موردی). */
 data class AppSettings(
-    val autoTrade: Boolean = false,
+    val autoTrade: Boolean = true,
     val realTrading: Boolean = false,
     val riskLevel: String = "MED",
     val capitalUsd: Double = 10000.0,
