@@ -36,7 +36,7 @@ interface CryptoApi {
     suspend fun marketChart(
         @Path("id") id: String,
         @Query("days") days: Int,
-        @Query("interval") interval: String
+        @Query("interval") interval: String?
     ): MarketChartDto
 }
 
@@ -174,7 +174,7 @@ class CryptoSource {
     }
 
     private suspend fun coinGeckoHistory(coinId: String, days: Int): List<PricePoint> {
-        val chart = api.marketChart(id = coinId, days = days, interval = "daily")
+        val chart = api.marketChart(id = coinId, days = days, interval = null)
         return chart.prices.orEmpty().mapNotNull { row ->
             if (row.size < 2) null else PricePoint(row[0].toLong(), row[1])
         }.filter { it.price.isFinite() && it.price > 0 }
