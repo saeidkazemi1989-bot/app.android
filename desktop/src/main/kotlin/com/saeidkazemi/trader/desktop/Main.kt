@@ -39,6 +39,10 @@ import kotlin.system.exitProcess
  * - آرگومان `--minimized` (برای اجرای خودکار با ویندوز) برنامه را بدون نمایش پنجره شروع می‌کند.
  */
 fun main(args: Array<String>) {
+    args.firstOrNull { it.startsWith("--selftest") }?.let { arg ->
+        val dir = arg.substringAfter("=", "").ifBlank { "selftest-out" }
+        exitProcess(runSelfTest(java.io.File(dir)))
+    }
     val startMinimized = args.contains("--minimized")
     val dataDir = DesktopPaths.dataDir()
 

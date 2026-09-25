@@ -91,6 +91,27 @@ jobs:
         with:
           name: MoameleYar-windows
           path: out/*
+      - name: Self-test packaged app (live data, news, screen rendering)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $exe = "desktop/build/compose/binaries/main/app/MoameleYar/MoameleYar.exe"
+          $dir = Join-Path $PWD "selftest"
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest=$dir" -PassThru
+          if (-not $p.WaitForExit(420000)) { $p.Kill(); Write-Host "::warning::self-test timed out" }
+          Write-Host "exit code: $($p.ExitCode)"
+          Write-Host "===== SELFTEST BEGIN ====="
+          if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
+          Write-Host "===== SELFTEST END ====="
+          if (Test-Path "$dir/selftest.txt") {
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(assets=|usdIrr=|signals=|newsFeed=|news |screenshot .*FAILED|SELFTEST CRASH|exit=)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-windows
+          path: selftest/*
+          if-no-files-found: ignore
 
   release:
     name: Publish downloadable build
