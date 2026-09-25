@@ -60,6 +60,8 @@ class MarketDataService {
     var lastIranScan: IranStockSource.ScanResult? = null
         private set
 
+    val iranError: String? get() = iranSource.lastError
+
     fun iranQuote(assetId: String): IranStockSource.Quote? = iranSource.quote(assetId)
 
     fun iranAdjustment(assetId: String): Pair<Int, Double>? = iranSource.adjustmentFor(assetId)

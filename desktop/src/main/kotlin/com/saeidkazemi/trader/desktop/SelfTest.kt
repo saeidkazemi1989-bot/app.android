@@ -67,7 +67,7 @@ fun runSelfTest(outDir: File): Int {
         }
         out("usdIrr=${st.usdIrr} fallback=${st.rateIsFallback}")
         container.marketDataService.lastIranScan?.let { sc ->
-            out("iranScan live=${sc.live} scanned=${sc.scanned} stocks=${sc.stocks} liquid=${sc.liquid} buyQ=${sc.buyQueues} sellQ=${sc.sellQueues}")
+            out("iranScan live=${sc.live} scanned=${sc.scanned} stocks=${sc.stocks} liquid=${sc.liquid} buyQ=${sc.buyQueues} sellQ=${sc.sellQueues} error=${container.marketDataService.iranError}")
         }
         st.signals.filter { it.market == MarketKind.IR_STOCK }.take(5).forEach {
             out("  IR ${it.symbol} score=${it.score} tech=${it.technicalScore} ${it.action}")
