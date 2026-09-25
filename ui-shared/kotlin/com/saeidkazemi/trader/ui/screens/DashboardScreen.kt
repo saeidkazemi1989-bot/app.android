@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saeidkazemi.trader.data.model.Action
 import com.saeidkazemi.trader.ui.UiState
+import com.saeidkazemi.trader.ui.components.NewsItemRow
 import com.saeidkazemi.trader.ui.components.InfoCard
 import com.saeidkazemi.trader.ui.components.SectionTitle
 import com.saeidkazemi.trader.ui.components.SimBadge
@@ -159,7 +160,7 @@ fun DashboardScreen(
                         .padding(12.dp)
                 ) {
                     Text("یادداشت‌ها", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF7B731))
-                    state.notes.take(4).forEach { n ->
+                    state.notes.take(6).forEach { n ->
                         Text("• " + n, fontSize = 11.sp, color = TextPrimaryNote, modifier = Modifier.padding(top = 3.dp))
                     }
                 }
@@ -215,6 +216,19 @@ fun DashboardScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
                 )
+            }
+
+            // مهم‌ترین اخبار اخیر
+            val strongNews = state.newsFeed
+                .filter { kotlin.math.abs(it.item.sentiment) >= 0.35 }
+                .take(3)
+            if (strongNews.isNotEmpty()) {
+                SectionTitle("مهم‌ترین اخبار مؤثر")
+                strongNews.forEach { e ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        NewsItemRow(item = e.item, symbol = e.symbol, onSymbolClick = { onOpenAsset(e.assetId) })
+                    }
+                }
             }
 
             // موقعیت‌های باز

@@ -27,9 +27,20 @@ jobs:
         with:
           gradle-version: "8.7"
       - name: Unit tests (core)
-        run: gradle :core:test --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :core:test 2>&1 | tee -a build.log
       - name: Build APK
-        run: gradle :app:assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug 2>&1 | tee -a build.log
+      - name: Report errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E -A2 "^e: |What went wrong|FAILED|^> [^T]|error:" build.log | grep -v "^--$" | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk MoameleYar-android.apk
       - uses: actions/upload-artifact@v4
@@ -59,7 +70,15 @@ jobs:
         with:
           gradle-version: "8.7"
       - name: Build Windows packages
-        run: gradle :desktop:packageMsi :desktop:packageExe :desktop:createDistributable --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :desktop:packageMsi :desktop:packageExe :desktop:createDistributable 2>&1 | tee -a build.log
+      - name: Report errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E -A2 "^e: |What went wrong|FAILED|^> [^T]|error:" build.log | grep -v "^--$" | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
       - name: Collect files
         shell: pwsh
         run: |

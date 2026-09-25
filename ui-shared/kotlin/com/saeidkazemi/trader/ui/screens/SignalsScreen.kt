@@ -194,10 +194,10 @@ private fun SignalCard(
 
         val m = sig.metrics
         val metricParts = mutableListOf<String>()
-        if (m.rsi != null) metricParts.add("آراس‌آی: " + Format.num(m.rsi, 0))
+        m.rsi?.let { metricParts.add("آراس‌آی: " + Format.num(it, 0)) }
         if (m.trendPct != null) metricParts.add("روند: " + Format.pct(m.trendPct))
         if (m.momentum7 != null) metricParts.add("هفتگی: " + Format.pct(m.momentum7))
-        if (m.volatility != null) metricParts.add("نوسان روزانه: " + Format.num(m.volatility, 1) + "٪")
+        m.volatility?.let { metricParts.add("نوسان روزانه: " + Format.num(it, 1) + "٪") }
         if (metricParts.isNotEmpty()) {
             Text(
                 text = metricParts.joinToString(" | "),

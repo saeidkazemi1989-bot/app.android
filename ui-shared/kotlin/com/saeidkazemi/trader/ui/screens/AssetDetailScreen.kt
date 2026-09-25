@@ -124,11 +124,12 @@ fun AssetDetailScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
-                if (asset.changePct24h != null) {
+                val change24 = asset.changePct24h
+                if (change24 != null) {
                     Text(
-                        "۲۴ ساعت: " + Format.pct(asset.changePct24h),
+                        "۲۴ ساعت: " + Format.pct(change24),
                         fontSize = 12.sp,
-                        color = pnlColor(asset.changePct24h),
+                        color = pnlColor(change24),
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
@@ -242,11 +243,11 @@ fun AssetDetailScreen(
                 }
                 val m = sig.metrics
                 Column(modifier = Modifier.padding(top = 8.dp)) {
-                    if (m.rsi != null) KVRow("آراس‌آی (۱۴)", Format.num(m.rsi, 1))
+                    m.rsi?.let { KVRow("آراس‌آی (۱۴)", Format.num(it, 1)) }
                     if (m.trendPct != null) KVRow("روند (فاصله میانگین‌ها)", Format.pct(m.trendPct))
                     if (m.momentum7 != null) KVRow("مومنتوم ۷ روزه", Format.pct(m.momentum7))
                     if (m.momentum30 != null) KVRow("مومنتوم ۳۰ روزه", Format.pct(m.momentum30))
-                    if (m.volatility != null) KVRow("نوسان روزانه", Format.num(m.volatility, 2) + "٪")
+                    m.volatility?.let { KVRow("نوسان روزانه", Format.num(it, 2) + "٪") }
                 }
             }
         }
