@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">معامله‌یار</string>
+    <string name="notif_service_title">معامله‌یار</string>
+    <string name="notif_channel_service">معامله‌گر خودکار</string>
+    <string name="notif_channel_trades">اعلان معاملات</string>
+</resources>
