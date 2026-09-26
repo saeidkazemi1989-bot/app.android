@@ -372,6 +372,30 @@ class TradeEngine(
         // ۵) حد ضرر متحرک: با هر قله تازه، حد ضرر بالا کشیده می‌شود تا سود قفل شود.
         broker.trail(priceMap)
 
+        // ۵-ب) قفل سود: وقتی سود خالص (پس از کارمزد) به آستانه (پیش‌فرض ۱۰٪) رسید، حد ضرر روی قیمتی می‌رود
+        // که فروش در آن همان سود (پیش‌فرض ۱۰٪) را حفظ کند. از آن به بعد، معامله دیگر نمی‌تواند زیان‌ده یا کم‌سودتر بسته شود
+        // (مگر پرش ناگهانی قیمت یا صف فروش). اگر قیمت باز هم بالا برود، حد ضرر متحرک آن را بالاتر می‌برد.
+        if (settings.profitLock) {
+            for (pos in broker.account().positions) {
+                val cur = priceMap[pos.assetId] ?: continue
+                if (!cur.isFinite() || cur <= 0) continue
+                val a = assetMap[pos.assetId]
+                val bf = feeFor(a, pos.market, true, settings)
+                val sf = feeFor(a, pos.market, false, settings)
+                val peak = maxOf(pos.peakUsd, cur)
+                val stop = RiskManager.ProfitLock.stopFor(
+                    pos.avgBuyUsd, peak, bf, sf, settings.profitLockTriggerPct, settings.profitLockKeepPct
+                ) ?: continue
+                val keep = minOf(settings.profitLockKeepPct, settings.profitLockTriggerPct)
+                if (broker.lockProfit(pos.assetId, stop, keep)) {
+                    notes.add(
+                        "قفل سود " + pos.symbol + ": سود خالص به " + Format.num(settings.profitLockTriggerPct, 0) +
+                            "٪ رسید؛ حد ضرر روی $" + Format.price(stop) + " رفت تا حداقل " + Format.num(keep, 0) + "٪ سود حفظ شود."
+                    )
+                }
+            }
+        }
+
         // ۶) مدیریت ریسک و فروش موقعیت‌های باز
         for (pos in broker.account().positions) {
             val asset = assetMap[pos.assetId] ?: continue
@@ -379,6 +403,8 @@ class TradeEngine(
             if (!curUsd.isFinite() || curUsd <= 0) continue
             val sig = signalMap[pos.assetId]
             val reason: String? = when {
+                curUsd <= pos.stopLossUsd && pos.profitLockedPct > 0 ->
+                    "حفظ سود (قفل سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪)"
                 curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (قفل سود)"
                 curUsd <= pos.stopLossUsd -> "فعال شدن حد ضرر"
                 curUsd >= pos.takeProfitUsd -> "فعال شدن حد سود"

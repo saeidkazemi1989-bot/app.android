@@ -165,6 +165,15 @@ private fun PositionRow(
                 color = Color(0xFFF7B731),
                 modifier = Modifier.padding(top = 2.dp)
             )
+            if (pos.profitLockedPct > 0) {
+                Text(
+                    "🔒 سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪ قفل شد",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = pnlColor(1.0),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
             Text("$" + Format.money(value), fontWeight = FontWeight.Bold, fontSize = 13.sp)

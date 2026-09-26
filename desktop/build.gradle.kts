@@ -29,7 +29,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.swing)
 }
 
-val appVersion = "1.2.1"
+val appVersion = "1.2.2"
 
 compose.desktop {
     application {

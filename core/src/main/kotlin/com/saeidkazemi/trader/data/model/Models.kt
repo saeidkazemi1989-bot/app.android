@@ -98,7 +98,9 @@ data class Position(
     /** بالاترین قیمت از زمان خرید (برای حد ضرر متحرک)؛ ۰ یعنی هنوز ثبت نشده. */
     val peakUsd: Double = 0.0,
     /** فاصله حد ضرر متحرک از قله (کسری، مثل ۰٫۰۸)؛ ۰ یعنی غیرفعال. */
-    val trailPct: Double = 0.0
+    val trailPct: Double = 0.0,
+    /** درصد سود خالصی که قفل شده (حد ضرر حداقل روی آن است)؛ ۰ یعنی هنوز قفل نشده. */
+    val profitLockedPct: Double = 0.0
 )
 
 /** یک معامله انجام‌شده (دمو یا واقعی). */
@@ -156,7 +158,13 @@ data class AppSettings(
     /** لرزش گوشی پس از پایان معامله. */
     val vibrateAlerts: Boolean = true,
     /** پخش صدا حتی وقتی گوشی روی بی‌صدا است (از کانال زنگ هشدار). */
-    val loudAlerts: Boolean = false
+    val loudAlerts: Boolean = false,
+    /** قفل سود: وقتی سود خالص به «آستانه» رسید، حد ضرر طوری بالا می‌رود که حداقل «سود حفظ‌شده» بماند. */
+    val profitLock: Boolean = true,
+    /** آستانه فعال شدن قفل سود (درصد سود خالص پس از کارمزد). */
+    val profitLockTriggerPct: Double = 10.0,
+    /** سودی که پس از فعال شدن قفل حفظ می‌شود (درصد خالص؛ حداکثر برابر آستانه). */
+    val profitLockKeepPct: Double = 10.0
 ) {
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
     fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel

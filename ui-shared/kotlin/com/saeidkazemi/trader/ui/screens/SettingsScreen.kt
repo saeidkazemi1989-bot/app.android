@@ -46,6 +46,12 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
     var tokenInput by remember(state.settings.nobitexToken) {
         mutableStateOf(state.settings.nobitexToken)
     }
+    var lockTrigger by remember(state.settings.profitLockTriggerPct) {
+        mutableStateOf(Format.raw(state.settings.profitLockTriggerPct, 1))
+    }
+    var lockKeep by remember(state.settings.profitLockKeepPct) {
+        mutableStateOf(Format.raw(state.settings.profitLockKeepPct, 1))
+    }
     var allocInputs by remember(state.settings.allocations) {
         mutableStateOf(
             listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
@@ -166,6 +172,67 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                 ) {
                     Text("ذخیره تقسیم سرمایه و شروع مجدد حساب دمو")
                 }
+            }
+        }
+
+        // قفل سود
+        item {
+            SettingsCard("قفل سود (حفظ سود به‌دست‌آمده)") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "وقتی سود خالص یک موقعیت (پس از کارمزد) به آستانه رسید، حد ضرر روی قیمتی می‌رود که فروش در آن " +
+                            "همان سود را حفظ کند. از آن به بعد، این معامله دیگر با سود کمتر یا زیان بسته نمی‌شود. " +
+                            "اگر قیمت باز هم بالا برود، حد ضرر متحرک آن را بالاتر می‌برد.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = state.settings.profitLock, onCheckedChange = { vm.toggleProfitLock(it) })
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = lockTrigger,
+                        onValueChange = { lockTrigger = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("وقتی سود رسید به ٪") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = lockKeep,
+                        onValueChange = { lockKeep = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("این سود حفظ شود ٪") },
+                        singleLine = true
+                    )
+                }
+                Button(
+                    onClick = {
+                        vm.setProfitLockLevels(lockTrigger.toDoubleOrNull() ?: -1.0, lockKeep.toDoubleOrNull() ?: -1.0)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Text("ذخیره قفل سود")
+                }
+                Text(
+                    "نکته: اگر هر دو عدد برابر باشند (مثل ۱۰ و ۱۰)، با کوچک‌ترین برگشت قیمت بعد از رسیدن به ۱۰٪ فروخته می‌شود. " +
+                        "اگر می‌خواهید معامله فرصت رشد بیشتر داشته باشد، عدد دوم را کمی کمتر بگذارید (مثلاً ۱۰ و ۸).",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         }
 

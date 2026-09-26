@@ -219,5 +219,26 @@ class PaperBroker(private val store: JsonStore) : Broker {
         moved
     }
 
+    /**
+     * قفل سود: حد ضرر را به [stopUsd] می‌برد (فقط اگر بالاتر از حد فعلی باشد؛ هیچ‌وقت پایین نمی‌آورد)
+     * و درصد سود قفل‌شده را ثبت می‌کند. خروجی: true اگر قفل تازه فعال شد.
+     */
+    fun lockProfit(assetId: String, stopUsd: Double, keepPct: Double): Boolean = synchronized(lock) {
+        if (!stopUsd.isFinite() || stopUsd <= 0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        val newlyLocked = pos.profitLockedPct < keepPct - 1e-9
+        val raise = stopUsd > pos.stopLossUsd * 1.0000001
+        if (!newlyLocked && !raise) return@synchronized false
+        val updated = pos.copy(
+            stopLossUsd = maxOf(pos.stopLossUsd, stopUsd),
+            profitLockedPct = maxOf(pos.profitLockedPct, keepPct)
+        )
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) updated else it })
+        acc = next
+        store.saveAccount(next)
+        newlyLocked
+    }
+
     private fun shortId(): String = UUID.randomUUID().toString().replace("-", "").take(10)
 }

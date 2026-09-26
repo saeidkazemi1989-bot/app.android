@@ -192,6 +192,28 @@ class TraderController(
         toast(if (on) "تحلیل تخصصی (جریان پول، حجم، ارزش‌گذاری، ترس و طمع، …) فعال شد." else "تحلیل تخصصی غیرفعال شد.")
     }
 
+    fun toggleProfitLock(on: Boolean) {
+        updateSettings { it.copy(profitLock = on) }
+        toast(if (on) "قفل سود فعال شد." else "قفل سود غیرفعال شد؛ فقط حد ضرر عادی و متحرک اعمال می‌شود.")
+    }
+
+    /** آستانه قفل سود و سود حفظ‌شده (درصد خالص). */
+    fun setProfitLockLevels(triggerPct: Double, keepPct: Double) {
+        if (!triggerPct.isFinite() || !keepPct.isFinite() || triggerPct < 1 || triggerPct > 500 || keepPct <= 0) {
+            toast("درصدهای معتبر وارد کنید (آستانه بین ۱ تا ۵۰۰).")
+            return
+        }
+        if (keepPct > triggerPct) {
+            toast("سود حفظ‌شده نمی‌تواند بیشتر از آستانه باشد.")
+            return
+        }
+        updateSettings { it.copy(profitLockTriggerPct = triggerPct, profitLockKeepPct = keepPct) }
+        toast(
+            "ذخیره شد: وقتی سود خالص به " + com.saeidkazemi.trader.util.Format.num(triggerPct, 1) + "٪ برسد، حداقل " +
+                com.saeidkazemi.trader.util.Format.num(keepPct, 1) + "٪ سود حفظ می‌شود."
+        )
+    }
+
     fun toggleSound(on: Boolean) = updateSettings { it.copy(soundAlerts = on) }
 
     fun toggleVibrate(on: Boolean) = updateSettings { it.copy(vibrateAlerts = on) }

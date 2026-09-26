@@ -68,6 +68,36 @@ class RiskManager {
         MarketKind.METAL -> Plan("نمایشی", 0, 0.0, 0.05, 0.1, 1.0, 10.0)
     }
 
+    /**
+     * قفل سود: محاسبات بر اساس سود **خالص** (پس از کارمزد خرید و فروش/مالیات) انجام می‌شود تا
+     * «۱۰٪ سود» واقعاً ۱۰٪ اضافه روی پول واردشده باشد.
+     *
+     * در خرید، کارمزد از مبلغ کم می‌شود: تعداد = مبلغ × (۱ − کارمزد خرید) ÷ قیمت خرید.
+     * در فروش: دریافتی = تعداد × قیمت × (۱ − کارمزد فروش).
+     */
+    object ProfitLock {
+        /** سود خالص (کسری) اگر با قیمت [price] فروخته شود. */
+        fun netGain(avgBuy: Double, price: Double, buyFee: Double, sellFee: Double): Double =
+            if (avgBuy <= 0) 0.0 else price * (1 - buyFee) * (1 - sellFee) / avgBuy - 1
+
+        /** قیمتی که فروش در آن دقیقاً [keepPct] درصد سود خالص می‌دهد. */
+        fun lockPrice(avgBuy: Double, keepPct: Double, buyFee: Double, sellFee: Double): Double =
+            avgBuy * (1 + keepPct / 100.0) / ((1 - buyFee) * (1 - sellFee))
+
+        /**
+         * اگر سود خالص در قله به [triggerPct] رسیده باشد، قیمت حد ضرر قفل سود را برمی‌گرداند (وگرنه null).
+         * سود حفظ‌شده هیچ‌وقت بیشتر از آستانه نیست.
+         */
+        fun stopFor(
+            avgBuy: Double, peak: Double, buyFee: Double, sellFee: Double,
+            triggerPct: Double, keepPct: Double
+        ): Double? {
+            if (triggerPct <= 0 || keepPct <= 0 || peak <= 0) return null
+            if (netGain(avgBuy, peak, buyFee, sellFee) * 100.0 + 1e-9 < triggerPct) return null
+            return lockPrice(avgBuy, minOf(keepPct, triggerPct), buyFee, sellFee)
+        }
+    }
+
     /** بازارهایی که سرمایه جداگانه می‌گیرند (فلزات فعلاً فقط نمایشی‌اند). */
     val tradableMarkets = listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
 }
