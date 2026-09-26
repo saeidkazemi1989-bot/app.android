@@ -43,6 +43,12 @@ jobs:
           grep -E -A2 "^e: |What went wrong|FAILED|^> [^T]|error:" build.log | grep -v "^--$" | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk MoameleYar-android.apk
+      - name: Verify APK signature (fixed key)
+        shell: bash
+        run: |
+          SIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$SIGNER" verify --print-certs MoameleYar-android.apk | tee sig.txt
+          grep -qi "aa:b2:40:80\|aab24080" <(tr -d ' ' < sig.txt | tr 'A-Z' 'a-z') && echo "::notice::APK signed with fixed MoameleYar key" || { echo "::error::unexpected signing key"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: MoameleYar-android-apk
