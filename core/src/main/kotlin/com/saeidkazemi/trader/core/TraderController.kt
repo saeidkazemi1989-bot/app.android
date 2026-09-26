@@ -296,7 +296,14 @@ class TraderController(
     fun setFeePct(pct: Double) {
         if (!pct.isFinite()) return
         updateSettings { it.copy(feePct = maxOf(0.0, minOf(0.02, pct))) }
-        toast("کارمزد ذخیره شد.")
+        toast("کارمزد فرضی فارکس ذخیره شد.")
+    }
+
+    /** پله کارمزد نوبیتکس (بر اساس حجم معاملات ۳۰ روز شما در نوبیتکس). */
+    fun setNobitexFeeTier(tier: Int) {
+        val t = tier.coerceIn(0, com.saeidkazemi.trader.trading.Fees.NOBITEX_TIERS.size - 1)
+        updateSettings { it.copy(nobitexFeeTier = t) }
+        toast("پله کارمزد نوبیتکس: " + com.saeidkazemi.trader.trading.Fees.NOBITEX_TIERS[t].name)
     }
 
     fun setCapitalAndReset(amountUsd: Double) {

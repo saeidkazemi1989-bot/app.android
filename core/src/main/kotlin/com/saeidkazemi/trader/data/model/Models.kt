@@ -27,7 +27,12 @@ data class Asset(
     /** بورس تهران: نماد در صف فروش است (فروش عملاً ممکن نیست). */
     val sellQueue: Boolean = false,
     /** ارزش معاملات امروز به ارز پایه (برای سهام: ریال). */
-    val tradeValue: Double? = null
+    val tradeValue: Double? = null,
+    /** سهام: نماد فرابورسی است (کارمزد خرید کمی کمتر). */
+    val farabourse: Boolean = false,
+    /** بهترین قیمت خرید و فروش در دفتر سفارش (به ارز پایه) برای محاسبه اسپرد واقعی. */
+    val bidPrice: Double? = null,
+    val askPrice: Double? = null
 )
 
 /** یک نقطه از تاریخچه قیمت (زمان به میلی‌ثانیه). */
@@ -145,7 +150,10 @@ data class AppSettings(
     val realTrading: Boolean = false,
     val riskLevel: String = "MED",
     val capitalUsd: Double = 10000.0,
+    /** کارمزد فرضی فارکس (کارمزد رمزارز و بورس از جدول رسمی Fees می‌آید). */
     val feePct: Double = 0.002,
+    /** پله کارمزد نوبیتکس (۰ = پایه … ۶ = VIP6) بر اساس حجم معاملات ۳۰ روز. */
+    val nobitexFeeTier: Int = 0,
     val buyThreshold: Int = 70,
     val sellThreshold: Int = 45,
     val nobitexToken: String = "",

@@ -192,11 +192,22 @@ class TradeEngine(
         _events.tryEmit(TradeEvent.Completed("TEST", MarketKind.CRYPTO, "TEST", true, "آزمایش هشدار انجام شد"))
     }
 
-    /** کارمزد واقعی هر بازار: سهام ایران کارمزد و مالیات خودش را دارد؛ بقیه طبق تنظیمات. */
+    /** کارمزد رسمی هر بازار (نوبیتکس طبق پله کارمزد، بورس طبق مصوبه سازمان بورس، فارکس فرضی). */
     private fun feeFor(asset: Asset?, kind: MarketKind?, buy: Boolean, settings: AppSettings): Double =
-        if ((asset?.market ?: kind) == MarketKind.IR_STOCK) {
-            if (buy) IranMarket.BUY_FEE else IranMarket.SELL_FEE
-        } else settings.feePct
+        Fees.commission(asset, kind, buy, settings)
+
+    /**
+     * نصف اسپرد واقعی (کسر): خرید با سفارش بازار به بهترین قیمت فروشنده و فروش به بهترین قیمت خریدار انجام می‌شود.
+     * رمزارز از دفتر سفارش نوبیتکس، سهام از سرخط سفارش‌های TSETMC؛ اگر نبود، مقدار پیش‌فرض محافظه‌کارانه.
+     */
+    fun halfSpread(asset: Asset?, kind: MarketKind?): Double {
+        val m = asset?.market ?: kind ?: return 0.0
+        return when (m) {
+            MarketKind.CRYPTO -> asset?.let { market.insights.cachedHalfSpread(it.symbol) } ?: (Fees.DEFAULT_SPREAD_CRYPTO / 2)
+            MarketKind.IR_STOCK -> asset?.let { Fees.halfSpreadOf(it.bidPrice, it.askPrice) } ?: (Fees.DEFAULT_SPREAD_IR / 2)
+            else -> 0.0
+        }
+    }
 
     /** دلیل ممنوعیت معامله سهام در این لحظه (بسته بودن بازار یا صف)، یا null اگر مجاز است. */
     private fun irBlock(asset: Asset, buy: Boolean): String? {
@@ -324,7 +335,8 @@ class TradeEngine(
         threshold: Int?,
         digest: NewsDigest?,
         hist: List<PricePoint>,
-        guardNote: String?
+        guardNote: String?,
+        spreadPct: Double? = null
     ) {
         try {
             val factor = if (asset.price > 0) trade.priceUsd / asset.price else 1.0
@@ -342,7 +354,8 @@ class TradeEngine(
                     mode = trade.mode,
                     openedAt = trade.ts,
                     entryUsd = trade.priceUsd,
-                    entryNative = asset.price,
+                    entryNative = asset.price * (1 + (spreadPct ?: 0.0) / 100),
+                    buySpreadPct = spreadPct,
                     nativeCurrency = asset.baseCurrency,
                     usdIrr = market.usdIrr(settings),
                     amountUsd = trade.usdValue,
@@ -383,7 +396,8 @@ class TradeEngine(
         asset: Asset?,
         trade: com.saeidkazemi.trader.data.model.Trade,
         reason: String,
-        sig: Signal?
+        sig: Signal?,
+        spreadPct: Double? = null
     ) {
         try {
             val track = tracker.track(pos.assetId).map { it.price }
@@ -396,7 +410,8 @@ class TradeEngine(
                 e.copy(
                     closedAt = trade.ts,
                     exitUsd = trade.priceUsd,
-                    exitNative = asset?.price,
+                    exitNative = asset?.price?.let { it * (1 - (spreadPct ?: 0.0) / 100) },
+                    sellSpreadPct = spreadPct,
                     exitReason = reason,
                     exitScore = sig?.score,
                     exitReasons = sig?.reasons?.take(8),
@@ -462,7 +477,7 @@ class TradeEngine(
                     stopUsd = pos.stopLossUsd,
                     takeProfitUsd = pos.takeProfitUsd,
                     buyFee = feeFor(asset, pos.market, true, settings),
-                    sellFee = feeFor(asset, pos.market, false, settings),
+                    sellFee = feeFor(asset, pos.market, false, settings) + halfSpread(asset, pos.market),
                     historyUsd = histUsd,
                     track = tracker.track(pos.assetId),
                     score = scores[pos.assetId],
@@ -638,7 +653,8 @@ class TradeEngine(
                 if (!cur.isFinite() || cur <= 0) continue
                 val a = assetMap[pos.assetId]
                 val bf = feeFor(a, pos.market, true, settings)
-                val sf = feeFor(a, pos.market, false, settings)
+                // فروش به بهترین قیمت خریدار انجام می‌شود، پس نصف اسپرد هم جزو هزینه فروش است
+                val sf = feeFor(a, pos.market, false, settings) + halfSpread(a, pos.market)
                 val peak = maxOf(pos.peakUsd, cur)
                 val stop = RiskManager.ProfitLock.stopFor(
                     pos.avgBuyUsd, peak, bf, sf, settings.profitLockTriggerPct, settings.profitLockKeepPct
@@ -677,10 +693,11 @@ class TradeEngine(
                     continue
                 }
                 announce("SELL", asset, pos.qty * curUsd, reason)
-                val trade = broker.sell(pos.assetId, curUsd, feeFor(asset, null, false, settings), reason)
+                val hs = halfSpread(asset, null)
+                val trade = broker.sell(pos.assetId, curUsd * (1 - hs), feeFor(asset, null, false, settings), reason)
                 if (trade != null) {
                     sells.add(pos.symbol)
-                    journalClose(pos, asset, trade, reason, sig)
+                    journalClose(pos, asset, trade, reason, sig, spreadPct = hs * 100)
                     val pnl = trade.usdValue - trade.feeUsd - pos.cost()
                     maybeRealSell(settings, asset, pos.qty, notes)
                     completed("SELL", asset, true, "فروش " + pos.symbol + " — " + reason, pnl)
@@ -726,9 +743,10 @@ class TradeEngine(
                     val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + ")"
                     val stopPct = plan.stopFor(sig.metrics.volatility)
                     announce("BUY", asset, amount, reason)
+                    val hs = halfSpread(asset, null)
                     val trade = broker.buy(
                         asset = asset,
-                        usdPrice = usdPrice,
+                        usdPrice = usdPrice * (1 + hs),
                         usdAmount = amount,
                         feePct = feeFor(asset, null, true, settings),
                         stopLossUsd = usdPrice * (1 - stopPct),
@@ -742,7 +760,8 @@ class TradeEngine(
                             asset, trade, sig, settings,
                             stopUsd = usdPrice * (1 - stopPct), tpUsd = usdPrice * (1 + plan.tpPct), trailPct = plan.trailPct,
                             auto = true, threshold = th, digest = digests[asset.id], hist = histories[asset.id].orEmpty(),
-                            guardNote = if (guard.active) guard.text else null
+                            guardNote = if (guard.active) guard.text else null,
+                            spreadPct = hs * 100
                         )
                         maybeRealBuy(settings, asset, amount, usdIrr, notes)
                         completed("BUY", asset, true, "خرید " + asset.symbol + " به مبلغ " + Format.num(amount) + " دلار")
@@ -796,9 +815,10 @@ class TradeEngine(
         }
         val stopPct = plan.stopFor(vol)
         announce("BUY", asset, usdAmount, "خرید دستی")
+        val hs = halfSpread(asset, null)
         val trade = broker.buy(
             asset = asset,
-            usdPrice = usdPrice,
+            usdPrice = usdPrice * (1 + hs),
             usdAmount = usdAmount,
             feePct = feeFor(asset, null, true, settings),
             stopLossUsd = usdPrice * (1 - stopPct),
@@ -816,7 +836,8 @@ class TradeEngine(
             asset, trade, lastSignals.firstOrNull { it.assetId == assetId }, settings,
             stopUsd = usdPrice * (1 - stopPct), tpUsd = usdPrice * (1 + plan.tpPct), trailPct = plan.trailPct,
             auto = false, threshold = settings.buyThreshold + plan.buyThresholdDelta,
-            digest = news.cached(assetId), hist = market.cachedHistory(assetId).orEmpty(), guardNote = null
+            digest = news.cached(assetId), hist = market.cachedHistory(assetId).orEmpty(), guardNote = null,
+            spreadPct = hs * 100
         )
         completed("BUY", asset, true, "خرید دستی " + asset.symbol + " به مبلغ " + Format.num(usdAmount) + " دلار")
         if (settings.realTrading) {
@@ -836,13 +857,14 @@ class TradeEngine(
         val usdPrice = if (asset != null) market.usdPriceOf(asset, settings) else pos.avgBuyUsd
         if (asset != null) irBlock(asset, buy = false)?.let { return "فروش ممکن نیست: " + it + "." }
         announce("SELL", pos.symbol, pos.market, pos.qty * usdPrice, "فروش دستی")
-        val trade = broker.sell(assetId, usdPrice, feeFor(asset, pos.market, false, settings), "فروش دستی")
+        val hs = halfSpread(asset, pos.market)
+        val trade = broker.sell(assetId, usdPrice * (1 - hs), feeFor(asset, pos.market, false, settings), "فروش دستی")
         if (trade == null) {
             completed("SELL", pos.symbol, pos.market, false, "فروش " + pos.symbol + " انجام نشد")
             return "فروش انجام نشد."
         }
         ensureJournal()
-        journalClose(pos, asset, trade, "فروش دستی", lastSignals.firstOrNull { it.assetId == assetId })
+        journalClose(pos, asset, trade, "فروش دستی", lastSignals.firstOrNull { it.assetId == assetId }, spreadPct = hs * 100)
         completed("SELL", pos.symbol, pos.market, true, "فروش دستی " + pos.symbol,
             trade.usdValue - trade.feeUsd - pos.cost())
         if (settings.realTrading && asset != null) {
@@ -850,7 +872,7 @@ class TradeEngine(
             maybeRealSell(settings, asset, pos.qty, notes)
             if (notes.isNotEmpty()) return "فروش در دفتر ثبت شد. " + notes.joinToString(" ")
         }
-        return "فروش " + pos.symbol + " با قیمت " + Format.num(usdPrice) + " دلار ثبت شد."
+        return "فروش " + pos.symbol + " با قیمت " + Format.num(trade.priceUsd) + " دلار ثبت شد."
     }
 
     fun resetPaperAccount(capitalUsd: Double) {

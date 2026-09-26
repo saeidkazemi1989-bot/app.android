@@ -115,6 +115,16 @@ fun runSelfTest(outDir: File): Int {
             val perf = com.saeidkazemi.trader.analysis.Performance.report(j, container.store.loadSettings())
             out("perf closed=${perf.all.closed} winRate=${perf.all.winRate} guards=" + perf.guards.joinToString("; ") { it.market.name + ":" + it.active })
         }
+        run {
+            val set = container.store.loadSettings()
+            out("fees " + com.saeidkazemi.trader.trading.Fees.table(set).joinToString(" | ") {
+                it.market.name + " buy=" + com.saeidkazemi.trader.util.Format.trim(it.buyPct, 4) + " sell=" + com.saeidkazemi.trader.util.Format.trim(it.sellPct, 4) + " real=" + it.real
+            })
+            val sp = (st.assets.filter { it.market == MarketKind.CRYPTO }.take(6) + st.assets.filter { it.market == MarketKind.IR_STOCK }.take(3))
+                .joinToString(" ") { it.symbol + "=" + "%.3f".format(container.tradeEngine.halfSpread(it, null) * 100) }
+            val j0 = container.tradeEngine.journal.all().firstOrNull()
+            out("fees halfSpread% " + sp + " | journal buySpread=" + j0?.buySpreadPct?.let { "%.3f".format(it) } + " feePct=" + j0?.let { if (it.amountUsd > 0) "%.3f".format(it.buyFeeUsd / it.amountUsd * 100) else null })
+        }
         container.tradeEngine.marketTrends().forEach { r ->
             out("trend ${r.market.name} label=${r.trendLabel} score=${r.trendScore} c1=${r.change1d?.let { "%.2f".format(it) }} c7=${r.change7d?.let { "%.2f".format(it) }} c30=${r.change30d?.let { "%.2f".format(it) }} " +
                 "breadth=${r.breadthAboveSma20?.let { "%.2f".format(it) }} n=${r.constituents} pts=${r.index.size} fc=${r.forecast?.trendLabel} facts=${r.facts.size} sim=${r.simulated}")

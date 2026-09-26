@@ -24,7 +24,7 @@ class InsightSource {
     @Volatile
     private var fngFetched = 0L
 
-    private class Book(val bidShare: Double?, val ts: Long)
+    private class Book(val bidShare: Double?, val halfSpread: Double?, val ts: Long)
 
     private val books = ConcurrentHashMap<String, Book>()
 
@@ -62,16 +62,28 @@ class InsightSource {
         val now = System.currentTimeMillis()
         books[sym]?.let { if (now - it.ts < 3 * 60_000L) return it.bidShare }
         var share: Double? = null
-        for (quote in listOf("USDT", "IRT")) {
-            share = try {
-                parseBidShare(getJson("https://apiv2.nobitex.ir/v3/orderbook/$sym$quote"))
+        var half: Double? = null
+        // اول بازار تومانی (سفارش واقعی ربات همان‌جا ثبت می‌شود و اسپرد آن هزینه واقعی است)، بعد تتری
+        for (quote in listOf("IRT", "USDT")) {
+            try {
+                val json = getJson("https://apiv2.nobitex.ir/v3/orderbook/$sym$quote")
+                share = parseBidShare(json)
+                half = parseHalfSpread(json)
             } catch (_: Exception) {
-                null
+                share = null
+                half = null
             }
             if (share != null) break
         }
-        books[sym] = Book(share, now)
+        books[sym] = Book(share, half, now)
         return share
+    }
+
+    /** نصف اسپرد آخرین دفتر سفارش دریافت‌شده (کسر؛ مثلاً ۰٫۰۰۱ = ۰٫۱٪)، اگر تازه‌تر از ۳۰ دقیقه باشد. */
+    fun cachedHalfSpread(symbol: String): Double? {
+        val sym = symbol.uppercase().filter { it.isLetterOrDigit() }
+        val b = books[sym] ?: return null
+        return if (System.currentTimeMillis() - b.ts < 30 * 60_000L) b.halfSpread else null
     }
 
     companion object {
@@ -83,6 +95,20 @@ class InsightSource {
             val label = first.get("value_classification")?.asString ?: ""
             val ts = (first.get("timestamp")?.asString?.toLongOrNull() ?: 0L) * 1000
             return FearGreed(v.coerceIn(0, 100), label, ts)
+        }
+
+        /** نصف فاصله بهترین قیمت فروش و خرید نسبت به قیمت میانی. */
+        fun parseHalfSpread(json: String): Double? {
+            val root = JsonParser.parseString(json)
+            if (!root.isJsonObject) return null
+            val o = root.asJsonObject
+            if (o.get("status")?.asString != "ok") return null
+            fun best(key: String, max: Boolean): Double? =
+                o.getAsJsonArray(key)?.mapNotNull { el ->
+                    if (!el.isJsonArray || el.asJsonArray.size() < 2) null
+                    else el.asJsonArray[0].asString.toDoubleOrNull()?.takeIf { it > 0 }
+                }?.let { if (max) it.maxOrNull() else it.minOrNull() }
+            return com.saeidkazemi.trader.trading.Fees.halfSpreadOf(best("bids", true), best("asks", false))
         }
 
         /** سهم حجم خرید در محدوده ±band از قیمت میانی. */

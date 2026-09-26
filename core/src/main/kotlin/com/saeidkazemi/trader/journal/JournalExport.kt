@@ -37,7 +37,9 @@ object JournalExport {
         entry.add("زمان: " + Format.dateTime(e.openedAt) + " • " + (if (e.auto) "خودکار" else "دستی") + " • " + (if (e.mode == "REAL") "واقعی" else "دمو"))
         entry.add("قیمت: " + usd(e.entryUsd) + (native(e, e.entryNative)?.let { " ≈ $it" } ?: "") +
             (if (e.usdIrr > 0 && e.nativeCurrency == "IRR") " (دلار " + Format.num(e.usdIrr, 0) + " ریال)" else ""))
-        entry.add("مبلغ: " + "$" + Format.money(e.amountUsd) + " • کارمزد خرید $" + Format.money(e.buyFeeUsd) + " • تعداد " + Format.price(e.qty))
+        entry.add("مبلغ: " + "$" + Format.money(e.amountUsd) + " • کارمزد خرید $" + Format.money(e.buyFeeUsd) +
+            (if (e.amountUsd > 0) " (" + Format.trim(e.buyFeeUsd / e.amountUsd * 100, 3) + "٪)" else "") + " • تعداد " + Format.price(e.qty))
+        e.buySpreadPct?.let { entry.add("اسپرد خرید: " + Format.trim(it, 3) + "٪ بالاتر از قیمت میانی (سفارش بازار به بهترین قیمت فروشنده)") }
         entry.add("دلیل: " + e.entryReason)
         if (e.backfilled) entry.add("این ردیف از تاریخچه معاملات قبل از ژورنال ساخته شده؛ جزئیات تحلیل لحظه خرید در دسترس نیست.")
         if (e.guardNote != null) entry.add("محافظ نرخ برد: " + e.guardNote)
@@ -93,13 +95,15 @@ object JournalExport {
             val x = ArrayList<String>()
             x.add("زمان: " + Format.dateTime(e.closedAt) + " • مدت نگهداری " + duration(e.holdMs))
             e.exitUsd?.let { x.add("قیمت: " + usd(it) + rel(it, e.entryUsd) + (native(e, e.exitNative)?.let { n -> " ≈ $n" } ?: "")) }
+            e.sellFeeUsd?.let { f -> x.add("کسورات فروش (کارمزد" + (if (e.market == com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK) " + ۰٫۵٪ مالیات" else "") + "): $" + Format.money(f)) }
+            e.sellSpreadPct?.let { x.add("اسپرد فروش: " + Format.trim(it, 3) + "٪ پایین‌تر از قیمت میانی (به بهترین قیمت خریدار)") }
             x.add("دلیل: " + (e.exitReason ?: "نامشخص"))
             e.exitScore?.let { x.add("امتیاز موتور در لحظه فروش: $it") }
             e.exitReasons.orEmpty().take(5).forEach { x.add("• $it") }
             if (e.profitLockedPct > 0) x.add("قفل سود فعال بود (حداقل " + Format.num(e.profitLockedPct, 0) + "٪)")
             out.add(Section("خروج", x))
             val r = ArrayList<String>()
-            e.pnlUsd?.let { r.add("سود/زیان واقعی (با هر دو کارمزد): " + (if (it >= 0) "+" else "") + "$" + Format.money(it) + " (" + Format.pct(e.pnlPct) + ")") }
+            e.pnlUsd?.let { r.add("سود/زیان واقعی (با کارمزدها، مالیات و اسپرد): " + (if (it >= 0) "+" else "") + "$" + Format.money(it) + " (" + Format.pct(e.pnlPct) + ")") }
             val mg = e.maxGainPct
             val md = e.maxDrawPct
             if (mg != null || md != null) {

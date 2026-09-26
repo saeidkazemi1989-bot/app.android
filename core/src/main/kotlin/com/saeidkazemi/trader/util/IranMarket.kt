@@ -18,11 +18,11 @@ object IranMarket {
     val OPEN: LocalTime = LocalTime.of(9, 0)
     val CLOSE: LocalTime = LocalTime.of(12, 30)
 
-    /** کارمزد تقریبی خرید سهام (کارگزار + سازمان + بورس + …). */
-    const val BUY_FEE = 0.003712
+    /** کارمزد رسمی خرید سهام بورس (جزئیات در Fees). */
+    const val BUY_FEE = com.saeidkazemi.trader.trading.Fees.IR_BOURSE_BUY
 
-    /** کارمزد تقریبی فروش سهام (شامل ۰٫۵٪ مالیات نقل‌وانتقال). */
-    const val SELL_FEE = 0.008812
+    /** کارمزد رسمی فروش سهام (شامل ۰٫۵٪ مالیات نقل‌وانتقال). */
+    const val SELL_FEE = com.saeidkazemi.trader.trading.Fees.IR_SELL
 
     fun isTradingDay(date: LocalDate): Boolean =
         date.dayOfWeek != DayOfWeek.THURSDAY && date.dayOfWeek != DayOfWeek.FRIDAY

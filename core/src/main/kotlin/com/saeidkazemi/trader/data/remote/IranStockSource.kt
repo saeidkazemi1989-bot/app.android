@@ -460,7 +460,10 @@ class IranStockSource {
                 rank = idx + 1,
                 buyQueue = q.buyQueue,
                 sellQueue = q.sellQueue,
-                tradeValue = q.valueIrr
+                tradeValue = q.valueIrr,
+                farabourse = q.isin.startsWith("IRO3"),
+                bidPrice = q.bidPrice.takeIf { it > 0 },
+                askPrice = q.askPrice.takeIf { it > 0 }
             )
         }
         return ScanResult(

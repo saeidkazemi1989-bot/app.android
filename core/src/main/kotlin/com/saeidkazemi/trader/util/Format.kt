@@ -18,6 +18,10 @@ object Format {
     /** عدد متعارف با جداکننده هزارگان. */
     fun num(v: Double, digits: Int = 2): String = money(v, digits)
 
+    /** عدد با حداکثر [digits] رقم اعشار و بدون صفرهای اضافه (۰٫۲۵۰۰ → ۰٫۲۵). */
+    fun trim(v: Double, digits: Int = 4): String =
+        money(v, digits).let { if (it.contains('.')) it.trimEnd('0').trimEnd('.') else it }
+
     fun price(v: Double): String {
         return when {
             v >= 1000 -> money(v, 0)

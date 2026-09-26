@@ -501,7 +501,51 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
 
         // کارمزد
         item {
-            SettingsCard("کارمزد معاملات") {
+            SettingsCard("کارمزد و هزینه واقعی معاملات") {
+                Text(
+                    "در هر خرید و فروش سه هزینه واقعی کم می‌شود: کارمزد رسمی، مالیات (فقط فروش سهام) و اسپرد، یعنی فاصله " +
+                        "بهترین قیمت خرید و فروش. سفارش بازار به بهترین قیمت فروشنده می‌خرد و به بهترین قیمت خریدار می‌فروشد. " +
+                        "اسپرد هر لحظه از دفتر سفارش زنده خوانده می‌شود.",
+                    fontSize = 11.sp,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                com.saeidkazemi.trader.trading.Fees.table(state.settings).forEach { ln ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(ln.market.faTitle + (if (ln.real) "" else " (فرضی)"), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "خرید " + Format.trim(ln.buyPct, 4) + "٪ • فروش " + Format.trim(ln.sellPct, 4) + "٪",
+                                fontSize = 12.sp,
+                                color = if (ln.real) Color(0xFF16C784) else Color(0xFFF7B731)
+                            )
+                        }
+                        Text(ln.detail, fontSize = 10.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Text(
+                    "پله کارمزد شما در نوبیتکس (بر اساس حجم معاملات ۳۰ روز اخیر؛ در پنل نوبیتکس ← سطح کاربری ببینید):",
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                com.saeidkazemi.trader.trading.Fees.NOBITEX_TIERS.withIndex().chunked(4).forEach { row ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { (i, t) ->
+                            FilterChip(
+                                selected = state.settings.nobitexFeeTier == i,
+                                onClick = { vm.setNobitexFeeTier(i) },
+                                label = { Text(t.name, fontSize = 11.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                Text(
+                    "کارمزد فرضی فارکس (درصد هر طرف معامله):",
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = feeInput,

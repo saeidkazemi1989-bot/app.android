@@ -25,6 +25,8 @@ data class JournalEntry(
     /** مبلغ پرداختی (شامل کارمزد خرید). */
     val amountUsd: Double,
     val buyFeeUsd: Double,
+    /** هزینه اسپرد خرید (درصد): فاصله قیمت خرید واقعی از قیمت میانی. */
+    val buySpreadPct: Double? = null,
     val qty: Double,
     val entryReason: String,
     val score: Int? = null,
@@ -61,6 +63,8 @@ data class JournalEntry(
     /** مبلغ دریافتی پس از کارمزد فروش. */
     val proceedsUsd: Double? = null,
     val sellFeeUsd: Double? = null,
+    /** هزینه اسپرد فروش (درصد). */
+    val sellSpreadPct: Double? = null,
     /** سود/زیان واقعی = دریافتی − پرداختی (هر دو کارمزد لحاظ شده). */
     val pnlUsd: Double? = null,
     val pnlPct: Double? = null,
