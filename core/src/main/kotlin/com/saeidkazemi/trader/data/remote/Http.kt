@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 object Http {
 
     /** نوبیتکس توصیه می‌کند بات‌ها خود را با الگوی TraderBot/<name-version> معرفی کنند. */
-    const val USER_AGENT = "TraderBot/MoameleYar-1.1.0"
+    const val USER_AGENT = "TraderBot/MoameleYar-1.2.0"
 
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()

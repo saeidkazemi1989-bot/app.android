@@ -34,7 +34,7 @@ import com.saeidkazemi.trader.ui.components.MarketChip
 import com.saeidkazemi.trader.ui.components.SentimentChip
 import com.saeidkazemi.trader.ui.components.SimBadge
 import com.saeidkazemi.trader.ui.components.pnlColor
-import com.saeidkazemi.trader.ui.planPositionPct
+import com.saeidkazemi.trader.ui.suggestedBuyUsd
 import com.saeidkazemi.trader.util.Format
 
 @Composable
@@ -44,11 +44,7 @@ fun SignalsScreen(
     onOpenAsset: (String) -> Unit
 ) {
     val held = state.heldAssetIds()
-    val suggested = minOf(
-        state.equityUsd * planPositionPct(state.settings.riskLevel),
-        state.account.cashUsd * 0.95
-    )
-    val suggestedStr = Format.raw(maxOf(0.0, suggested), 2)
+    val suggestedByMarket = state.sleeves().associate { it.market to Format.raw(maxOf(0.0, suggestedBuyUsd(state, it.market) * 0.98), 2) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -63,8 +59,10 @@ fun SignalsScreen(
                     .padding(12.dp)
             ) {
                 Text(
-                    "موتور تحلیل، هر دارایی را بر اساس روند، مومنتوم، مکدی و آراس‌آی از ۰ تا ۱۰۰ امتیاز می‌دهد " +
-                        "و سپس اثر اخبار و اطلاعیه‌های کدال را (از ۱۲- تا ۱۲+) اضافه می‌کند. " +
+                    "موتور تحلیل، هر دارایی را بر اساس روند، مومنتوم، مکدی و آراس‌آی از ۰ تا ۱۰۰ امتیاز می‌دهد، " +
+                        "اثر اخبار و اطلاعیه‌های کدال (۱۲- تا ۱۲+) و تحلیل تخصصی (۲۰- تا ۲۰+: جریان پول حقیقی/حقوقی، " +
+                        "قدرت خریدار، حجم مشکوک، P/E گروه، وضعیت کل بازار، ترس و طمع، روند بیت‌کوین، دفتر سفارش) را اضافه می‌کند. " +
+                        "هر بازار با سرمایه و آستانه ریسک خودش جداگانه معامله می‌کند. " +
                         "در حالت خودکار، فقط سیگنال‌های خرید با امتیاز " + state.settings.buyThreshold + " به بالا معامله می‌شوند " +
                         "و حد ضرر/حد سود روی هر موقعیت اعمال می‌شود.",
                     fontSize = 12.sp,
@@ -89,7 +87,7 @@ fun SignalsScreen(
                 SignalCard(
                     sig = sig,
                     isHeld = held.contains(sig.assetId),
-                    suggestedStr = suggestedStr,
+                    suggestedStr = suggestedByMarket[sig.market] ?: "0",
                     onBuy = onBuy,
                     onOpenAsset = onOpenAsset
                 )
@@ -165,20 +163,27 @@ private fun SignalCard(
             trackColor = MaterialTheme.colorScheme.surfaceVariant
         )
 
-        if (sig.newsLabel != null) {
+        if (sig.newsLabel != null || sig.proFactors.isNotEmpty()) {
             Row(
                 modifier = Modifier.padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val sign = if (sig.newsAdj > 0) "+" else ""
-                SentimentChip(sig.newsAdj.toDouble(), "اخبار: " + sign + sig.newsAdj)
-                Spacer(Modifier.width(6.dp))
+                if (sig.newsLabel != null) {
+                    val sign = if (sig.newsAdj > 0) "+" else ""
+                    SentimentChip(sig.newsAdj.toDouble(), "اخبار: " + sign + sig.newsAdj)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (sig.proFactors.isNotEmpty()) {
+                    val ps = if (sig.proAdj > 0) "+" else ""
+                    SentimentChip(sig.proAdj.toDouble(), "تخصصی: " + ps + sig.proAdj)
+                    Spacer(Modifier.width(6.dp))
+                }
                 Text(
-                    sig.newsLabel + " • تکنیکال: " + sig.technicalScore,
+                    "تکنیکال: " + sig.technicalScore,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (sig.newsBlocked) {
+                if (sig.newsBlocked || sig.proBlocked) {
                     Spacer(Modifier.width(6.dp))
                     SentimentChip(-1.0, "خرید متوقف")
                 }

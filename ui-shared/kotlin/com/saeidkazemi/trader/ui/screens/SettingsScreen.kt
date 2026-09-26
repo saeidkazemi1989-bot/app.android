@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.saeidkazemi.trader.analysis.RiskManager
+import com.saeidkazemi.trader.data.model.MarketKind
 import com.saeidkazemi.trader.ui.UiState
 import com.saeidkazemi.trader.util.Format
 import com.saeidkazemi.trader.core.TraderController
@@ -43,6 +45,12 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
     }
     var tokenInput by remember(state.settings.nobitexToken) {
         mutableStateOf(state.settings.nobitexToken)
+    }
+    var allocInputs by remember(state.settings.allocations) {
+        mutableStateOf(
+            listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
+                .associateWith { Format.raw(state.settings.allocationPct(it), 0) }
+        )
     }
 
     LazyColumn(
@@ -81,44 +89,189 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             }
         }
 
-        // سطح ریسک
+        // تقسیم سرمایه بین بازارها
         item {
-            SettingsCard("سطح ریسک") {
+            SettingsCard("تقسیم سرمایه بین بازارها") {
                 Text(
-                    "تعداد موقعیت، سهم هر خرید و حد ضرر/حد سود را تعیین می‌کند.",
+                    "هر بازار صندوق جداگانه دارد و فقط با سهم خودش معامله می‌کند؛ سود و زیان هر بازار هم جدا حساب می‌شود. " +
+                        "مثلاً ۵۰٪ ارز دیجیتال، ۴۰٪ بورس تهران و ۱۰٪ ارز خارجی. صفر یعنی آن بازار معامله نمی‌شود. " +
+                        "با ذخیره، حساب دمو با تقسیم جدید از نو ساخته می‌شود.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                val markets = listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
+                markets.forEach { m ->
+                    val cur = allocInputs[m] ?: ""
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(m.faTitle, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        OutlinedTextField(
+                            value = cur,
+                            onValueChange = { v -> allocInputs = allocInputs + (m to v) },
+                            modifier = Modifier.weight(0.8f),
+                            label = { Text("درصد") },
+                            singleLine = true
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("کم‌ریسک" to "LOW", "متوسط" to "MED", "پرریسک" to "HIGH").forEach { (title, key) ->
+                            FilterChip(
+                                selected = state.settings.riskFor(m) == key,
+                                onClick = { vm.setMarketRisk(m, key) },
+                                label = { Text(title, fontSize = 11.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    val plan = RiskManager().plan(state.settings.riskFor(m), m)
+                    Text(
+                        "تا " + plan.maxPositions + " موقعیت، هر کدام " + Format.num(plan.positionPct * 100, 0) + "٪ این بخش، " +
+                            "حد ضرر بر اساس نوسان " + Format.num(plan.minStopPct * 100, 1) + "–" + Format.num(plan.maxStopPct * 100, 1) + "٪، " +
+                            "حد ضرر متحرک " + Format.num(plan.trailPct * 100, 1) + "٪ زیر قله" +
+                            (if (m == MarketKind.IR_STOCK) "؛ فقط در ساعت بازار و بدون صف" else if (m == MarketKind.CRYPTO) "؛ ۲۴ ساعته" else ""),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                val sum = markets.sumOf { allocInputs[it]?.toDoubleOrNull() ?: 0.0 }
+                Text(
+                    "جمع: " + Format.num(sum, 1) + "٪" + (if (kotlin.math.abs(sum - 100) > 0.5) " (باید ۱۰۰ باشد)" else ""),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (kotlin.math.abs(sum - 100) > 0.5) Color(0xFFE5484D) else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                Button(
+                    onClick = {
+                        vm.setAllocationsAndReset(
+                            allocInputs[MarketKind.CRYPTO]?.toDoubleOrNull() ?: -1.0,
+                            allocInputs[MarketKind.IR_STOCK]?.toDoubleOrNull() ?: -1.0,
+                            allocInputs[MarketKind.FX]?.toDoubleOrNull() ?: -1.0
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Text("ذخیره تقسیم سرمایه و شروع مجدد حساب دمو")
+                }
+            }
+        }
+
+        // تحلیل تخصصی
+        item {
+            SettingsCard("تحلیل تخصصی") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("فراتر از نمودار و کندل", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            "بورس: قدرت خریدار حقیقی (سرانه خرید به فروش)، ورود/خروج پول حقیقی امروز و ۵ روز اخیر، حجم مشکوک، " +
+                                "P/E در برابر میانه گروه صنعت، زیان‌دهی شرکت و وضعیت کل بازار (درصد نمادهای مثبت و جریان پول کل). " +
+                                "ارز دیجیتال: شاخص ترس و طمع، فیلتر روند بیت‌کوین، قدرت نسبی در برابر بیت‌کوین، حجم غیرعادی و " +
+                                "فشار دفتر سفارش نوبیتکس. تا ۲۰± امتیاز اثر دارد و در شرایط خطرناک خرید را متوقف می‌کند.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                            lineHeight = 18.sp
+                        )
+                    }
+                    Switch(
+                        checked = state.settings.proAnalysis,
+                        onCheckedChange = { vm.toggleProAnalysis(it) }
+                    )
+                }
+            }
+        }
+
+        // هشدار صوتی و لرزش
+        item {
+            SettingsCard("هشدار صوتی و لرزش معاملات") {
+                Text(
+                    "قبل از هر خرید/فروش یک صدای هشدار پخش می‌شود و پس از انجام معامله، صدای دیگری همراه با لرزش گوشی.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(
+                SwitchRow("صدای شروع و پایان معامله", state.settings.soundAlerts) { vm.toggleSound(it) }
+                if (!state.platform.isDesktop) {
+                    SwitchRow("لرزش پس از انجام معامله", state.settings.vibrateAlerts) { vm.toggleVibrate(it) }
+                    SwitchRow("پخش حتی در حالت بی‌صدا (کانال زنگ هشدار)", state.settings.loudAlerts) { vm.toggleLoud(it) }
+                }
+                OutlinedButton(
+                    onClick = { vm.testAlert() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(top = 8.dp)
                 ) {
-                    val options = listOf(
-                        "کم‌ریسک" to "LOW",
-                        "متوسط" to "MED",
-                        "پرریسک" to "HIGH"
-                    )
-                    options.forEach { (title, key) ->
-                        FilterChip(
-                            selected = state.settings.riskLevel == key,
-                            onClick = { vm.setRiskLevel(key) },
-                            label = { Text(title, fontSize = 12.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Text("آزمایش صدا و لرزش")
                 }
-                Text(
-                    text = when (state.settings.riskLevel) {
-                        "LOW" -> "تا ۶ موقعیت، هر کدام ۱۰٪ سرمایه، حد ضرر ۴٪"
-                        "HIGH" -> "تا ۴ موقعیت، هر کدام ۲۲٪ سرمایه، حد ضرر ۸٪"
-                        else -> "تا ۵ موقعیت، هر کدام ۱۵٪ سرمایه، حد ضرر ۶٪"
-                    },
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
+            }
+        }
+
+        // کار دائمی با قفل گوشی
+        if (!state.platform.isDesktop) {
+            item {
+                SettingsCard("کار دائمی حتی با قفل بودن گوشی") {
+                    val ignored = state.platform.batteryOptimizationIgnored
+                    Text(
+                        "معامله‌گر در یک سرویس پیش‌زمینه با قفل پردازنده (WakeLock) و وای‌فای کار می‌کند تا با خاموش شدن صفحه " +
+                            "متوقف نشود؛ اگر سیستم آن را ببندد، خودکار دوباره اجرا می‌شود. برای اطمینان کامل، برنامه باید از " +
+                            "«بهینه‌سازی باتری» معاف باشد.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
+                    )
+                    Text(
+                        when (ignored) {
+                            true -> "✅ معافیت از بهینه‌سازی باتری فعال است."
+                            false -> "⚠️ برنامه هنوز از بهینه‌سازی باتری معاف نیست؛ ممکن است با قفل گوشی کند یا متوقف شود."
+                            null -> ""
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (ignored == true) Color(0xFF2EBD85) else Color(0xFFF7B731),
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                    if (ignored != true) {
+                        Button(
+                            onClick = { vm.requestBatteryExemption() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                        ) {
+                            Text("معاف کردن از بهینه‌سازی باتری")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { vm.openAppSettings() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp)
+                    ) {
+                        Text("تنظیمات برنامه (اجرای خودکار / باتری)")
+                    }
+                    Text(
+                        autostartHint(state.platform.manufacturer),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                        lineHeight = 18.sp
+                    )
+                }
             }
         }
 
@@ -314,6 +467,37 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** راهنمای اجرای خودکار برای رابط‌های سفارشی سازندگان مختلف. */
+private fun autostartHint(manufacturer: String): String {
+    val m = manufacturer.lowercase()
+    return when {
+        "xiaomi" in m || "redmi" in m || "poco" in m ->
+            "شیائومی/ردمی/پوکو: تنظیمات برنامه ← «اجرای خودکار» (Autostart) را روشن و «صرفه‌جویی باتری» را روی «بدون محدودیت» بگذارید؛ در لیست برنامه‌های اخیر هم برنامه را قفل کنید."
+        "huawei" in m || "honor" in m ->
+            "هواوی/آنر: تنظیمات ← باتری ← راه‌اندازی برنامه ← معامله‌یار را «مدیریت دستی» و هر سه گزینه را روشن کنید."
+        "samsung" in m ->
+            "سامسونگ: تنظیمات برنامه ← باتری ← «بدون محدودیت» را انتخاب کنید و برنامه را از «برنامه‌های در حالت خواب» خارج کنید."
+        "oppo" in m || "realme" in m || "oneplus" in m || "vivo" in m ->
+            "اوپو/ریلمی/وان‌پلاس/ویوو: تنظیمات برنامه ← باتری ← «اجازه فعالیت در پس‌زمینه» و «اجرای خودکار» را روشن کنید."
+        else ->
+            "در برخی گوشی‌ها (شیائومی، هواوی، سامسونگ، اوپو) علاوه بر این، باید در تنظیمات برنامه «اجرای خودکار» و «باتری بدون محدودیت» را هم فعال کنید."
     }
 }
 

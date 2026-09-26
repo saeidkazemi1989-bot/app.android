@@ -1,6 +1,11 @@
 package com.saeidkazemi.trader.viewmodel
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.saeidkazemi.trader.TraderApp
@@ -27,8 +32,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 name = "اندروید",
                 autostartSupported = false,
                 autostartEnabled = false,
-                dataLocation = "حافظه داخلی گوشی"
+                dataLocation = "حافظه داخلی گوشی",
+                batteryOptimizationIgnored = batteryIgnored(app),
+                vibrationSupported = (app as TraderApp).alerts.hasVibrator(),
+                manufacturer = Build.MANUFACTURER ?: ""
             )
+
+            override fun requestBatteryExemption() = requestIgnoreBattery(app)
+
+            override fun openAppSettings() {
+                try {
+                    app.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + app.packageName))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {
+                }
+            }
 
             override fun onAutoTradeChanged(on: Boolean) {
                 if (on) TradingService.start(getApplication()) else TradingService.stop(getApplication())
@@ -42,5 +62,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         controller.start()
+    }
+
+    companion object {
+        fun batteryIgnored(app: Application): Boolean = try {
+            app.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(app.packageName) == true
+        } catch (_: Exception) {
+            false
+        }
+
+        /** نمایش پنجره سیستمی «اجازه اجرا در پس‌زمینه بدون محدودیت باتری». */
+        fun requestIgnoreBattery(app: Application) {
+            if (batteryIgnored(app)) return
+            try {
+                @Suppress("BatteryLife")
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + app.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                app.startActivity(intent)
+            } catch (_: Exception) {
+                try {
+                    app.startActivity(
+                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 }

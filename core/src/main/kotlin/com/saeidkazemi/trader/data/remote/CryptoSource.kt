@@ -152,9 +152,11 @@ class CryptoSource {
         if (root.get("s")?.asString != "ok") return emptyList()
         val t = root.getAsJsonArray("t") ?: return emptyList()
         val c = root.getAsJsonArray("c") ?: return emptyList()
+        val v = root.getAsJsonArray("v")
         return (0 until minOf(t.size(), c.size())).mapNotNull { i ->
             val price = c[i].asDouble
-            if (price.isFinite() && price > 0) PricePoint(t[i].asLong * 1000, price) else null
+            val vol = if (v != null && i < v.size()) (try { v[i].asDouble } catch (_: Exception) { 0.0 }) else 0.0
+            if (price.isFinite() && price > 0) PricePoint(t[i].asLong * 1000, price, if (vol.isFinite()) vol else 0.0) else null
         }.sortedBy { it.t }
     }
 
@@ -169,7 +171,8 @@ class CryptoSource {
             val o = el.asJsonObject
             val close = o.get("close")?.asDouble ?: return@mapNotNull null
             val time = o.get("time")?.asLong ?: return@mapNotNull null
-            if (close.isFinite() && close > 0) PricePoint(time * 1000, close) else null
+            val vol = o.get("volumefrom")?.asDouble ?: 0.0
+            if (close.isFinite() && close > 0) PricePoint(time * 1000, close, vol) else null
         }
     }
 

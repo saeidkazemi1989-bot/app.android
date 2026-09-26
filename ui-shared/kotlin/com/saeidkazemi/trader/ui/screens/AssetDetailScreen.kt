@@ -43,7 +43,7 @@ import com.saeidkazemi.trader.ui.components.sentimentColor
 import com.saeidkazemi.trader.ui.components.PriceChart
 import com.saeidkazemi.trader.ui.components.SimBadge
 import com.saeidkazemi.trader.ui.components.pnlColor
-import com.saeidkazemi.trader.ui.planPositionPct
+import com.saeidkazemi.trader.ui.suggestedBuyUsd
 import com.saeidkazemi.trader.util.Format
 
 @Composable
@@ -55,10 +55,7 @@ fun AssetDetailScreen(
     onBack: () -> Unit
 ) {
     val detail = state.detail
-    val suggested = minOf(
-        state.equityUsd * planPositionPct(state.settings.riskLevel),
-        state.account.cashUsd * 0.95
-    )
+    val suggested = detail?.asset?.let { suggestedBuyUsd(state, it.market) * 0.98 } ?: 0.0
     var amountInput by remember(assetId) {
         mutableStateOf(Format.raw(maxOf(0.0, suggested), 2))
     }
@@ -224,10 +221,14 @@ fun AssetDetailScreen(
                         }
                     )
                 }
-                if (sig.newsLabel != null) {
+                if (sig.newsLabel != null || sig.proFactors.isNotEmpty()) {
                     val sign = if (sig.newsAdj > 0) "+" else ""
+                    val proSign = if (sig.proAdj > 0) "+" else ""
                     Text(
-                        "امتیاز تکنیکال " + sig.technicalScore + " " + sign + sig.newsAdj + " (اثر اخبار) = " + sig.score,
+                        "امتیاز تکنیکال " + sig.technicalScore +
+                            (if (sig.newsLabel != null) " " + sign + sig.newsAdj + " (اخبار)" else "") +
+                            (if (sig.proFactors.isNotEmpty()) " " + proSign + sig.proAdj + " (تخصصی)" else "") +
+                            " = " + sig.score,
                         fontSize = 12.sp,
                         color = sentimentColor(sig.newsAdj.toDouble()),
                         modifier = Modifier.padding(top = 4.dp)
@@ -248,6 +249,63 @@ fun AssetDetailScreen(
                     if (m.momentum7 != null) KVRow("مومنتوم ۷ روزه", Format.pct(m.momentum7))
                     if (m.momentum30 != null) KVRow("مومنتوم ۳۰ روزه", Format.pct(m.momentum30))
                     m.volatility?.let { KVRow("نوسان روزانه", Format.num(it, 2) + "٪") }
+                }
+            }
+        }
+
+        // تحلیل تخصصی
+        if (sig != null && sig.proFactors.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    "تحلیل تخصصی (اثر " + (if (sig.proAdj > 0) "+" else "") + sig.proAdj + ")",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    if (asset.market == com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK)
+                        "جریان پول حقیقی/حقوقی، قدرت خریدار، حجم مشکوک، P/E نسبت به گروه و وضعیت کل بازار"
+                    else "ترس و طمع بازار، روند بیت‌کوین، قدرت نسبی، حجم غیرعادی و فشار دفتر سفارش",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                )
+                sig.proFactors.forEach { f ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(f.title, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(f.value, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (f.note.isNotEmpty()) {
+                                Text(f.note, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Text(
+                            (if (f.impact > 0) "+" else "") + f.impact,
+                            fontWeight = FontWeight.Bold,
+                            color = sentimentColor(f.impact.toDouble()),
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+                if (sig.proBlocked) {
+                    Text(
+                        "⛔ " + (sig.proBlockReason ?: "خرید متوقف شد"),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = pnlColor(-1.0),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                 }
             }
         }

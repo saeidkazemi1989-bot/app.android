@@ -60,6 +60,7 @@ fun main(args: Array<String>) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val notifier = TrayNotifier()
     val controller = TraderController(container, scope, DesktopHooks(notifier))
+    SoundAlerts.attach(container, scope)
     controller.start()
 
     application {

@@ -17,6 +17,10 @@ import kotlin.math.roundToInt
  *
  * سپس «اثر خبری» (از ۱۲- تا ۱۲+) بر اساس اخبار و اطلاعیه‌های کدال اضافه می‌شود و اگر خبر منفی
  * مهم و تازه‌ای وجود داشته باشد، خرید جدید آن دارایی متوقف می‌شود.
+ *
+ * در نهایت «تحلیل تخصصی» ([ProAnalysis]: جریان پول حقیقی/حقوقی، قدرت خریدار، حجم مشکوک، P/E نسبت به
+ * گروه، وضعیت کل بازار، ترس و طمع، فیلتر بیت‌کوین، قدرت نسبی، دفتر سفارش) تا ±۲۰ امتیاز اثر می‌گذارد
+ * و در شرایط خطرناک خرید را متوقف می‌کند.
  */
 class StrategyEngine {
 
@@ -28,7 +32,9 @@ class StrategyEngine {
         asset: Asset,
         history: List<PricePoint>,
         settings: AppSettings,
-        news: NewsDigest? = null
+        news: NewsDigest? = null,
+        pro: ProAnalysis.Result? = null,
+        buyThreshold: Int = settings.buyThreshold
     ): Signal? {
         if (history.size < MIN_HISTORY) return null
         val v = history.map { it.price }.toDoubleArray()
@@ -113,7 +119,17 @@ class StrategyEngine {
         val useNews = settings.newsEnabled && news != null
         val newsAdj = if (useNews && news != null) news.adjustment else 0
         val blocked = useNews && news != null && news.blockBuy
-        val total = maxOf(0, minOf(100, technical + newsAdj))
+        val usePro = settings.proAnalysis && pro != null
+        val proAdj = if (usePro && pro != null) pro.adj else 0
+        val proBlocked = usePro && pro != null && pro.blockBuy
+        val total = maxOf(0, minOf(100, technical + newsAdj + proAdj))
+        if (usePro && pro != null && pro.factors.isNotEmpty()) {
+            reasons.add("تحلیل تخصصی: اثر " + ProAnalysis.signed(proAdj))
+            pro.factors.filter { it.impact != 0 }.sortedByDescending { kotlin.math.abs(it.impact) }.take(4).forEach { f ->
+                reasons.add(f.title + " " + f.value + " (" + ProAnalysis.signed(f.impact) + ")")
+            }
+            if (proBlocked) reasons.add(pro.blockReason ?: "شرایط تخصصی نامناسب؛ خرید متوقف شد")
+        }
         if (useNews && news != null) {
             if (news.available) {
                 val sign = if (newsAdj > 0) "+" else ""
@@ -128,8 +144,8 @@ class StrategyEngine {
             if (blocked) reasons.add(news.blockReason ?: "خبر منفی مهم؛ خرید متوقف شد")
         }
         val action = when {
-            blocked && total >= settings.buyThreshold -> Action.HOLD
-            total >= settings.buyThreshold -> Action.BUY
+            (blocked || proBlocked) && total >= buyThreshold -> Action.HOLD
+            total >= buyThreshold -> Action.BUY
             total <= 35 -> Action.SELL
             else -> Action.HOLD
         }
@@ -158,7 +174,11 @@ class StrategyEngine {
             newsAdj = newsAdj,
             newsCount = news?.items?.size ?: 0,
             newsLabel = if (useNews && news != null) news.label else null,
-            newsBlocked = blocked
+            newsBlocked = blocked,
+            proAdj = proAdj,
+            proFactors = if (usePro && pro != null) pro.factors else emptyList(),
+            proBlocked = proBlocked,
+            proBlockReason = if (proBlocked && pro != null) pro.blockReason else null
         )
     }
 }

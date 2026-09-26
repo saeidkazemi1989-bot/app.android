@@ -1,5 +1,6 @@
 package com.saeidkazemi.trader.trading
 
+import com.saeidkazemi.trader.analysis.ProAnalysis
 import com.saeidkazemi.trader.analysis.RiskManager
 import com.saeidkazemi.trader.analysis.StrategyEngine
 import com.saeidkazemi.trader.data.local.JsonStore
@@ -10,6 +11,9 @@ import com.saeidkazemi.trader.data.model.MarketKind
 import com.saeidkazemi.trader.data.model.OrderResult
 import com.saeidkazemi.trader.data.model.PricePoint
 import com.saeidkazemi.trader.data.model.Signal
+import com.saeidkazemi.trader.data.model.TradeEvent
+import com.saeidkazemi.trader.data.model.AccountState
+import com.saeidkazemi.trader.data.remote.IranStockSource
 import com.saeidkazemi.trader.data.remote.MarketDataService
 import com.saeidkazemi.trader.data.remote.RefreshResult
 import com.saeidkazemi.trader.news.NewsDigest
@@ -20,6 +24,7 @@ import com.saeidkazemi.trader.util.IranMarket
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,6 +37,12 @@ import kotlinx.coroutines.sync.withLock
  * مرتبط (کدال، اخبار فارسی و جهانی) را برای بهترین فرصت‌ها و دارایی‌های پرتفوی بررسی می‌کند،
  * حد ضرر/حد سود/ضعف سیگنال/خبر منفی مهم را روی موقعیت‌های باز اعمال می‌کند و در حالت خودکار،
  * بهترین فرصت‌ها را طبق بودجه و ریسک تعریف‌شده — بدون نیاز به تأیید موردی — می‌خرد.
+ *
+ * سرمایه بین بازارها تقسیم شده است و هر بازار (ارز دیجیتال، بورس تهران، ارز خارجی) با سرمایه، سطح
+ * ریسک، حد ضرر مبتنی بر نوسان و حد ضرر متحرک خودش مستقل معامله می‌کند.
+ *
+ * قبل از هر معامله رویداد [TradeEvent.Starting] (صدای هشدار) و پس از انجام آن [TradeEvent.Completed]
+ * (صدای دوم و لرزش) منتشر می‌شود.
  */
 class TradeEngine(
     private val market: MarketDataService,
@@ -52,6 +63,133 @@ class TradeEngine(
 
         /** تعداد درخواست هم‌زمان تاریخچه. */
         const val HISTORY_PARALLELISM = 6
+
+        /** تعداد ارزهای دیجیتال برتر که دفتر سفارششان در هر دور بررسی می‌شود. */
+        const val BOOK_CANDIDATES = 8
+
+        /** فاصله هشدار صوتی «شروع معامله» تا اجرای معامله. */
+        const val ALERT_LEAD_MS = 1_800L
+
+        fun fearGreedFa(label: String?): String? = when (label?.lowercase()) {
+            null, "" -> null
+            "extreme fear" -> "ترس شدید"
+            "fear" -> "ترس"
+            "neutral" -> "خنثی"
+            "greed" -> "طمع"
+            "extreme greed" -> "طمع شدید"
+            else -> label
+        }
+    }
+
+    private val _events = MutableSharedFlow<TradeEvent>(extraBufferCapacity = 64)
+
+    /** رویدادهای شروع/پایان معامله برای هشدار صوتی، لرزش و اعلان. */
+    val events: SharedFlow<TradeEvent> = _events
+
+    private fun planFor(settings: AppSettings, m: MarketKind): RiskManager.Plan =
+        riskManager.plan(settings.riskFor(m), m)
+
+    /** ارزش کل (نقد + موقعیت‌ها) بخش اختصاصی یک بازار. */
+    private fun sleeveEquity(acc: AccountState, m: MarketKind, prices: Map<String, Double>): Double =
+        (acc.cashByMarket[m.name] ?: 0.0) + acc.positions.filter { it.market == m }
+            .sumOf { p -> (prices[p.assetId]?.takeIf { it.isFinite() && it > 0 } ?: p.avgBuyUsd) * p.qty }
+
+    private fun flowDay(f: IranStockSource.ClientFlow, price: Double) = ProAnalysis.FlowDay(
+        date = f.date,
+        buyIVol = f.buyIVol,
+        sellIVol = f.sellIVol,
+        buyNVol = f.buyNVol,
+        buyICount = f.buyICount,
+        sellICount = f.sellICount,
+        netRealValueIrr = f.realNetValue(price)
+    )
+
+    /** ورودی‌های تحلیل تخصصی یک دارایی را از داده‌های کش‌شده می‌سازد. */
+    private fun proFor(
+        asset: Asset,
+        history: List<PricePoint>,
+        settings: AppSettings,
+        btcHistory: List<PricePoint>,
+        bidShare: Double?
+    ): ProAnalysis.Result? {
+        if (!settings.proAnalysis || asset.isSimulated) return null
+        return when (asset.market) {
+            MarketKind.IR_STOCK -> {
+                val q = market.iranQuote(asset.id)
+                val price = q?.price ?: asset.price
+                val stats = market.iranStats
+                ProAnalysis.iran(
+                    history,
+                    ProAnalysis.IranInputs(
+                        today = market.iranFlow(asset.id)?.let { flowDay(it, price) },
+                        history = market.iranFlowHistory(asset.id).map { flowDay(it, price) },
+                        pe = q?.pe,
+                        eps = q?.eps,
+                        sectorPe = q?.sector?.let { stats?.sectorPe?.get(it) },
+                        breadth = stats?.breadth,
+                        marketRealNetIrr = stats?.realNetIrr,
+                        marketValueIrr = stats?.totalValueIrr,
+                        usdIrr = market.usdIrr(settings)
+                    )
+                )
+            }
+
+            MarketKind.CRYPTO -> {
+                val fg = market.insights.cachedFearGreed()
+                ProAnalysis.crypto(
+                    history,
+                    ProAnalysis.CryptoInputs(
+                        isBtc = asset.symbol.equals("BTC", ignoreCase = true),
+                        fearGreed = fg?.value,
+                        fearGreedLabel = fearGreedFa(fg?.label),
+                        btcHistory = btcHistory,
+                        bidShare = bidShare
+                    )
+                )
+            }
+
+            else -> null
+        }
+    }
+
+    /** تحلیل کامل یک دارایی (تکنیکال + اخبار + تخصصی) برای صفحه جزئیات. */
+    suspend fun analyzeFull(asset: Asset, history: List<PricePoint>, news: NewsDigest?): Signal? {
+        val settings = store.loadSettings()
+        val btc = if (asset.market == MarketKind.CRYPTO) {
+            market.cachedAssets().firstOrNull { it.symbol == "BTC" && it.market == MarketKind.CRYPTO }
+                ?.let { try { market.historyFor(it) } catch (_: Exception) { emptyList() } }.orEmpty()
+        } else emptyList()
+        if (asset.market == MarketKind.CRYPTO && settings.proAnalysis) {
+            try { market.insights.fearGreed() } catch (_: Exception) { }
+        }
+        val book = if (asset.market == MarketKind.CRYPTO && settings.proAnalysis) {
+            try { market.insights.bidShare(asset.symbol) } catch (_: Exception) { null }
+        } else null
+        val pro = proFor(asset, history, settings, btc, book)
+        val th = settings.buyThreshold + planFor(settings, asset.market).buyThresholdDelta
+        return strategy.analyze(asset, history, settings, news, pro, th)
+    }
+
+    private suspend fun announce(side: String, symbol: String, m: MarketKind, amountUsd: Double, reason: String) {
+        _events.tryEmit(TradeEvent.Starting(symbol, m, side, amountUsd, reason))
+        delay(ALERT_LEAD_MS)
+    }
+
+    private suspend fun announce(side: String, asset: Asset, amountUsd: Double, reason: String) =
+        announce(side, asset.symbol, asset.market, amountUsd, reason)
+
+    private fun completed(side: String, symbol: String, m: MarketKind, ok: Boolean, msg: String, pnl: Double? = null) {
+        _events.tryEmit(TradeEvent.Completed(symbol, m, side, ok, msg, pnl))
+    }
+
+    private fun completed(side: String, asset: Asset, ok: Boolean, msg: String, pnl: Double? = null) =
+        completed(side, asset.symbol, asset.market, ok, msg, pnl)
+
+    /** تست هشدار صوتی/لرزشی از صفحه تنظیمات (بدون معامله). */
+    suspend fun testAlert() {
+        _events.tryEmit(TradeEvent.Starting("TEST", MarketKind.CRYPTO, "TEST", 0.0, "آزمایش هشدار"))
+        delay(ALERT_LEAD_MS)
+        _events.tryEmit(TradeEvent.Completed("TEST", MarketKind.CRYPTO, "TEST", true, "آزمایش هشدار انجام شد"))
     }
 
     /** کارمزد واقعی هر بازار: سهام ایران کارمزد و مالیات خودش را دارد؛ بقیه طبق تنظیمات. */
@@ -82,7 +220,6 @@ class TradeEngine(
 
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
         val settings = store.loadSettings()
-        val plan = riskManager.plan(settings.riskLevel)
         val buys = mutableListOf<String>()
         val sells = mutableListOf<String>()
         val notes = mutableListOf<String>()
@@ -182,27 +319,71 @@ class TradeEngine(
             }
         }
 
-        // ۳) سیگنال نهایی = تکنیکال + اثر اخبار
-        val signals = technical.map { t ->
-            val d = digests[t.assetId]
-            if (d == null) t else {
-                val asset = assets.first { it.id == t.assetId }
-                strategy.analyze(asset, histories[t.assetId].orEmpty(), settings, d) ?: t
+        // ۳) تحلیل تخصصی (جریان پول، حجم، ارزش‌گذاری، ترس و طمع، روند بیت‌کوین، دفتر سفارش)
+        val assetMap = assets.associateBy { it.id }
+        val heldNow = broker.account().positions.map { it.assetId }.toSet()
+        val btcAsset = assets.firstOrNull { it.market == MarketKind.CRYPTO && it.symbol == "BTC" }
+        val btcHistory = btcAsset?.let { histories[it.id] }.orEmpty()
+        val books = HashMap<String, Double>()
+        if (settings.proAnalysis) {
+            if (assets.any { it.market == MarketKind.CRYPTO && !it.isDisplayOnly }) {
+                try { market.insights.fearGreed() } catch (_: Exception) { }
+                val bookTargets = (technical.filter { it.market == MarketKind.CRYPTO }.take(BOOK_CANDIDATES).map { it.assetId } +
+                    heldNow.filter { assetMap[it]?.market == MarketKind.CRYPTO }).distinct()
+                val got = coroutineScope {
+                    bookTargets.mapNotNull { assetMap[it] }.map { a ->
+                        async { sem.withPermit { a.id to (try { market.insights.bidShare(a.symbol) } catch (_: Exception) { null }) } }
+                    }.awaitAll()
+                }
+                for ((id, v) in got) if (v != null) books[id] = v
             }
+            val proNotes = mutableListOf<String>()
+            market.insights.cachedFearGreed()?.let { proNotes.add("ترس و طمع ارز دیجیتال: " + it.value + " (" + (fearGreedFa(it.label) ?: "") + ")") }
+            if (btcHistory.size >= 50) {
+                val v = btcHistory.map { it.price }.toDoubleArray()
+                val sma = com.saeidkazemi.trader.analysis.Indicators.sma(v, 50)
+                if (sma != null) proNotes.add("بیت‌کوین " + (if (v.last() >= sma) "بالای" else "زیر") + " میانگین ۵۰روزه")
+            }
+            market.iranStats?.let { st ->
+                val b = st.breadth
+                if (b != null && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
+                    proNotes.add("بورس: " + Format.num(b * 100, 0) + "٪ نمادها مثبت" +
+                        (st.realNetIrr?.let { n -> "، " + (if (n >= 0) "ورود" else "خروج") + " پول حقیقی " + Format.compactIrr(kotlin.math.abs(n)) } ?: ""))
+                }
+            }
+            if (proNotes.isNotEmpty()) notes.add("تحلیل تخصصی — " + proNotes.joinToString("؛ ") + ".")
+            if (market.iranFlowError != null && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
+                notes.add("داده حقیقی/حقوقی بورس دریافت نشد؛ تحلیل جریان پول سهام در این دور انجام نشد.")
+            }
+        }
+
+        // ۴) سیگنال نهایی = تکنیکال + اثر اخبار + تحلیل تخصصی (با آستانه خرید اختصاصی هر بازار)
+        val signals = technical.map { t ->
+            val asset = assetMap[t.assetId] ?: return@map t
+            val hist = histories[t.assetId].orEmpty()
+            val pro = proFor(asset, hist, settings, btcHistory, books[asset.id])
+            val th = settings.buyThreshold + planFor(settings, asset.market).buyThresholdDelta
+            strategy.analyze(asset, hist, settings, digests[t.assetId], pro, th) ?: t
         }.sortedByDescending { it.score }
         lastSignals = signals
         val signalMap = signals.associateBy { it.assetId }
+        val priceMap = assets.associate { it.id to market.usdPriceOf(it, settings) }
 
-        // ۴) مدیریت ریسک و فروش موقعیت‌های باز
+        // ۵) حد ضرر متحرک: با هر قله تازه، حد ضرر بالا کشیده می‌شود تا سود قفل شود.
+        broker.trail(priceMap)
+
+        // ۶) مدیریت ریسک و فروش موقعیت‌های باز
         for (pos in broker.account().positions) {
-            val asset = assets.firstOrNull { it.id == pos.assetId } ?: continue
-            val curUsd = market.usdPriceOf(asset, settings)
+            val asset = assetMap[pos.assetId] ?: continue
+            val curUsd = priceMap[asset.id] ?: continue
             if (!curUsd.isFinite() || curUsd <= 0) continue
             val sig = signalMap[pos.assetId]
             val reason: String? = when {
+                curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (قفل سود)"
                 curUsd <= pos.stopLossUsd -> "فعال شدن حد ضرر"
                 curUsd >= pos.takeProfitUsd -> "فعال شدن حد سود"
                 sig != null && sig.newsBlocked -> "خروج به‌خاطر خبر منفی مهم"
+                sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
                 sig != null && sig.score <= settings.sellThreshold -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
                 else -> null
             }
@@ -212,54 +393,66 @@ class TradeEngine(
                     if (IranMarket.isOpen()) notes.add("فروش " + pos.symbol + " (" + reason + ") ممکن نشد: " + blocked + ".")
                     continue
                 }
+                announce("SELL", asset, pos.qty * curUsd, reason)
                 val trade = broker.sell(pos.assetId, curUsd, feeFor(asset, null, false, settings), reason)
                 if (trade != null) {
                     sells.add(pos.symbol)
+                    val pnl = trade.usdValue - trade.feeUsd - pos.qty * pos.avgBuyUsd
                     maybeRealSell(settings, asset, pos.qty, notes)
+                    completed("SELL", asset, true, "فروش " + pos.symbol + " — " + reason, pnl)
+                } else {
+                    completed("SELL", asset, false, "فروش " + pos.symbol + " انجام نشد")
                 }
             }
         }
 
-        // ۵) خرید خودکار بهترین فرصت‌ها (بدون تأیید موردی)
+        // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
         if (settings.autoTrade) {
-            val priceMap = assets.associate { it.id to market.usdPriceOf(it, settings) }
-            val account = broker.account()
-            val equity = account.cashUsd + account.positions.sumOf { p ->
-                (priceMap[p.assetId] ?: p.avgBuyUsd) * p.qty
-            }
-            val reserve = equity * plan.cashReservePct
-            var cash = account.cashUsd
-            for (sig in signals) {
-                if (sig.action != Action.BUY) continue
-                if (broker.account().positions.size >= plan.maxPositions) break
-                if (broker.account().positions.any { it.assetId == sig.assetId }) continue
-                if (sells.contains(sig.symbol)) continue
-                val asset = assets.firstOrNull { it.id == sig.assetId } ?: continue
-                // روی داده شبیه‌سازی‌شده خودکار خرید نمی‌شود تا سود/زیان دمو واقعی بماند.
-                if (asset.isSimulated) continue
-                // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
-                if (irBlock(asset, buy = true) != null) continue
-                val usdPrice = priceMap[asset.id] ?: continue
-                if (!usdPrice.isFinite() || usdPrice <= 0) continue
-                val budget = equity * plan.positionPct
-                val available = cash - reserve
-                val amount = minOf(budget, available)
-                if (amount < plan.minTradeUsd) break
-                val newsPart = if (sig.newsAdj != 0) "، اخبار " + (if (sig.newsAdj > 0) "+" else "") + sig.newsAdj else ""
-                val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + ")"
-                val trade = broker.buy(
-                    asset = asset,
-                    usdPrice = usdPrice,
-                    usdAmount = amount,
-                    feePct = feeFor(asset, null, true, settings),
-                    stopLossUsd = usdPrice * (1 - plan.stopPct),
-                    takeProfitUsd = usdPrice * (1 + plan.tpPct),
-                    reason = reason
-                )
-                if (trade != null) {
-                    cash -= amount
-                    buys.add(asset.symbol)
-                    maybeRealBuy(settings, asset, amount, usdIrr, notes)
+            for (m in riskManager.tradableMarkets) {
+                if (settings.allocationPct(m) <= 0.0) continue
+                val plan = planFor(settings, m)
+                val acc0 = broker.account()
+                val equity = sleeveEquity(acc0, m, priceMap)
+                val reserve = equity * plan.cashReservePct
+                for (sig in signals) {
+                    if (sig.market != m || sig.action != Action.BUY) continue
+                    val acc = broker.account()
+                    if (acc.positions.count { it.market == m } >= plan.maxPositions) break
+                    if (acc.positions.any { it.assetId == sig.assetId }) continue
+                    if (sells.contains(sig.symbol)) continue
+                    val asset = assetMap[sig.assetId] ?: continue
+                    // روی داده شبیه‌سازی‌شده خودکار خرید نمی‌شود تا سود/زیان دمو واقعی بماند.
+                    if (asset.isSimulated) continue
+                    // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
+                    if (irBlock(asset, buy = true) != null) continue
+                    val usdPrice = priceMap[asset.id] ?: continue
+                    if (!usdPrice.isFinite() || usdPrice <= 0) continue
+                    val budget = equity * plan.positionPct
+                    val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve
+                    val amount = minOf(budget, available)
+                    if (amount < plan.minTradeUsd) break
+                    val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
+                    val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
+                    val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + ")"
+                    val stopPct = plan.stopFor(sig.metrics.volatility)
+                    announce("BUY", asset, amount, reason)
+                    val trade = broker.buy(
+                        asset = asset,
+                        usdPrice = usdPrice,
+                        usdAmount = amount,
+                        feePct = feeFor(asset, null, true, settings),
+                        stopLossUsd = usdPrice * (1 - stopPct),
+                        takeProfitUsd = usdPrice * (1 + plan.tpPct),
+                        reason = reason,
+                        trailPct = plan.trailPct
+                    )
+                    if (trade != null) {
+                        buys.add(asset.symbol)
+                        maybeRealBuy(settings, asset, amount, usdIrr, notes)
+                        completed("BUY", asset, true, "خرید " + asset.symbol + " به مبلغ " + Format.num(amount) + " دلار")
+                    } else {
+                        completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
+                    }
                 }
             }
             if (signals.isEmpty()) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")
@@ -286,26 +479,41 @@ class TradeEngine(
     /** خرید دستی از صفحه جزئیات. */
     suspend fun manualBuy(assetId: String, usdAmount: Double): String {
         val settings = store.loadSettings()
-        val plan = riskManager.plan(settings.riskLevel)
         val asset = market.cachedAssets().firstOrNull { it.id == assetId }
             ?: return "دارایی پیدا نشد؛ ابتدا بازار را به‌روزرسانی کنید."
         if (asset.isDisplayOnly) return "این دارایی فقط نمایشی است و معامله نمی‌شود."
+        val plan = planFor(settings, asset.market)
         irBlock(asset, buy = true)?.let { return "خرید ممکن نیست: " + it + "." }
         val usdPrice = market.usdPriceOf(asset, settings)
         if (!usdPrice.isFinite() || usdPrice <= 0) return "قیمت معتبر در دسترس نیست."
         val account = broker.account()
         if (account.positions.any { it.assetId == assetId }) return "این دارایی را از قبل در پرتفوی دارید."
         if (usdAmount < plan.minTradeUsd) return "حداقل مبلغ معامله " + plan.minTradeUsd.toInt() + " دلار است."
-        if (usdAmount > account.cashUsd) return "موجودی نقد کافی نیست."
+        val sleeve = account.cashByMarket[asset.market.name] ?: 0.0
+        if (usdAmount > sleeve + 1e-9) {
+            return "موجودی نقد بخش " + asset.market.faTitle + " کافی نیست (" + Format.num(sleeve) + " دلار). " +
+                "هر بازار فقط با سرمایه اختصاصی خودش معامله می‌کند؛ سهم بازارها را در تنظیمات تغییر دهید."
+        }
+        val vol = market.cachedHistory(asset.id)?.let { h ->
+            com.saeidkazemi.trader.analysis.Indicators.dailyVolatilityPct(h.map { it.price }.toDoubleArray(), 30)
+        }
+        val stopPct = plan.stopFor(vol)
+        announce("BUY", asset, usdAmount, "خرید دستی")
         val trade = broker.buy(
             asset = asset,
             usdPrice = usdPrice,
             usdAmount = usdAmount,
             feePct = feeFor(asset, null, true, settings),
-            stopLossUsd = usdPrice * (1 - plan.stopPct),
+            stopLossUsd = usdPrice * (1 - stopPct),
             takeProfitUsd = usdPrice * (1 + plan.tpPct),
-            reason = "خرید دستی"
-        ) ?: return "خرید انجام نشد."
+            reason = "خرید دستی",
+            trailPct = plan.trailPct
+        )
+        if (trade == null) {
+            completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
+            return "خرید انجام نشد."
+        }
+        completed("BUY", asset, true, "خرید دستی " + asset.symbol + " به مبلغ " + Format.num(usdAmount) + " دلار")
         if (settings.realTrading) {
             val notes = mutableListOf<String>()
             maybeRealBuy(settings, asset, usdAmount, market.usdIrr(settings), notes)
@@ -322,8 +530,14 @@ class TradeEngine(
         val asset = market.cachedAssets().firstOrNull { it.id == assetId }
         val usdPrice = if (asset != null) market.usdPriceOf(asset, settings) else pos.avgBuyUsd
         if (asset != null) irBlock(asset, buy = false)?.let { return "فروش ممکن نیست: " + it + "." }
+        announce("SELL", pos.symbol, pos.market, pos.qty * usdPrice, "فروش دستی")
         val trade = broker.sell(assetId, usdPrice, feeFor(asset, pos.market, false, settings), "فروش دستی")
-            ?: return "فروش انجام نشد."
+        if (trade == null) {
+            completed("SELL", pos.symbol, pos.market, false, "فروش " + pos.symbol + " انجام نشد")
+            return "فروش انجام نشد."
+        }
+        completed("SELL", pos.symbol, pos.market, true, "فروش دستی " + pos.symbol,
+            trade.usdValue - trade.feeUsd - pos.qty * pos.avgBuyUsd)
         if (settings.realTrading && asset != null) {
             val notes = mutableListOf<String>()
             maybeRealSell(settings, asset, pos.qty, notes)
@@ -333,7 +547,7 @@ class TradeEngine(
     }
 
     fun resetPaperAccount(capitalUsd: Double) {
-        broker.reset(capitalUsd)
+        broker.reset(capitalUsd, store.loadSettings().allocations)
     }
 
     // ---- بخش معامله واقعی (آزمایشی، فقط نوبیتکس) ----

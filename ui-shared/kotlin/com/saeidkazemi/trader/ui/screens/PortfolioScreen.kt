@@ -30,6 +30,7 @@ import com.saeidkazemi.trader.data.model.Trade
 import com.saeidkazemi.trader.ui.UiState
 import com.saeidkazemi.trader.ui.components.InfoCard
 import com.saeidkazemi.trader.ui.components.SectionTitle
+import com.saeidkazemi.trader.ui.components.SleevesCard
 import com.saeidkazemi.trader.ui.components.pnlColor
 import com.saeidkazemi.trader.util.Format
 
@@ -90,6 +91,8 @@ fun PortfolioScreen(
                 )
             }
         }
+
+        item { SleevesCard(state = state, detailed = true) }
 
         item { SectionTitle("موقعیت‌های باز (" + account.positions.size + ")") }
 

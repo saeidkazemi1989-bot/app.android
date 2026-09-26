@@ -31,7 +31,15 @@ data class Asset(
 )
 
 /** یک نقطه از تاریخچه قیمت (زمان به میلی‌ثانیه). */
-data class PricePoint(val t: Long, val price: Double)
+data class PricePoint(val t: Long, val price: Double, val volume: Double = 0.0)
+
+/** یک عامل تحلیل تخصصی (مثل «ورود پول حقیقی» یا «شاخص ترس و طمع») با اثرش روی امتیاز. */
+data class ProFactor(
+    val title: String,
+    val value: String,
+    val impact: Int,
+    val note: String = ""
+)
 
 enum class Action(val faTitle: String) { BUY("خرید"), SELL("فروش"), HOLD("نگهداری") }
 
@@ -64,7 +72,13 @@ data class Signal(
     val newsCount: Int = 0,
     val newsLabel: String? = null,
     /** خرید به‌خاطر خبر منفی مهم متوقف شده است. */
-    val newsBlocked: Boolean = false
+    val newsBlocked: Boolean = false,
+    /** اثر تحلیل تخصصی (جریان پول، حجم، ارزش‌گذاری، وضعیت کل بازار، …). */
+    val proAdj: Int = 0,
+    val proFactors: List<ProFactor> = emptyList(),
+    /** خرید به‌خاطر شرایط تخصصی (مثل خروج سنگین پول حقیقی یا بازار نزولی) متوقف شده است. */
+    val proBlocked: Boolean = false,
+    val proBlockReason: String? = null
 )
 
 /** موقعیت باز در پرتفوی. حسابداری همه موقعیت‌ها بر مبنای دلار است. */
@@ -80,7 +94,11 @@ data class Position(
     val stopLossUsd: Double,
     val takeProfitUsd: Double,
     /** آخرین روز (yyyymmdd) که بابت افزایش سرمایه/سود نقدی تعدیل شد. */
-    val adjDay: Int? = null
+    val adjDay: Int? = null,
+    /** بالاترین قیمت از زمان خرید (برای حد ضرر متحرک)؛ ۰ یعنی هنوز ثبت نشده. */
+    val peakUsd: Double = 0.0,
+    /** فاصله حد ضرر متحرک از قله (کسری، مثل ۰٫۰۸)؛ ۰ یعنی غیرفعال. */
+    val trailPct: Double = 0.0
 )
 
 /** یک معامله انجام‌شده (دمو یا واقعی). */
@@ -105,7 +123,13 @@ data class AccountState(
     val realizedPnlUsd: Double = 0.0,
     val positions: List<Position> = emptyList(),
     val trades: List<Trade> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** نقد اختصاصی هر بازار (کلید: نام MarketKind). هر بازار فقط با سرمایه خودش معامله می‌کند. */
+    val cashByMarket: Map<String, Double> = emptyMap(),
+    /** سرمایه اولیه اختصاص‌یافته به هر بازار. */
+    val capitalByMarket: Map<String, Double> = emptyMap(),
+    /** سود/زیان تحقق‌یافته هر بازار. */
+    val realizedByMarket: Map<String, Double> = emptyMap()
 )
 
 /** تنظیمات کلی اپ. معامله خودکار به‌صورت پیش‌فرض روشن است (در حالت دمو، بدون تأیید موردی). */
@@ -120,8 +144,49 @@ data class AppSettings(
     val nobitexToken: String = "",
     val usdIrrFallback: Double = 900000.0,
     /** بررسی اخبار (کدال، اخبار فارسی و جهانی) و اثر دادن آن در تصمیم خرید/فروش. */
-    val newsEnabled: Boolean = true
-)
+    val newsEnabled: Boolean = true,
+    /** تحلیل تخصصی (جریان پول حقیقی/حقوقی، حجم، P/E، ترس و طمع، دفتر سفارش، وضعیت کل بازار). */
+    val proAnalysis: Boolean = true,
+    /** درصد سرمایه هر بازار (کلید: نام MarketKind). جمع باید ۱۰۰ باشد. */
+    val allocations: Map<String, Double> = mapOf("CRYPTO" to 50.0, "IR_STOCK" to 40.0, "FX" to 10.0),
+    /** سطح ریسک جداگانه هر بازار (LOW / MED / HIGH). */
+    val marketRisk: Map<String, String> = mapOf("CRYPTO" to "MED", "IR_STOCK" to "MED", "FX" to "LOW"),
+    /** هشدار صوتی هنگام شروع و پایان هر معامله. */
+    val soundAlerts: Boolean = true,
+    /** لرزش گوشی پس از پایان معامله. */
+    val vibrateAlerts: Boolean = true,
+    /** پخش صدا حتی وقتی گوشی روی بی‌صدا است (از کانال زنگ هشدار). */
+    val loudAlerts: Boolean = false
+) {
+    fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
+    fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel
+}
+
+/** رویدادهای معامله برای هشدار صوتی/لرزشی و اعلان. */
+sealed class TradeEvent {
+    abstract val symbol: String
+    abstract val market: MarketKind
+    abstract val side: String
+
+    /** موتور تصمیم به معامله گرفت و در حال اجراست (صدای اول). */
+    data class Starting(
+        override val symbol: String,
+        override val market: MarketKind,
+        override val side: String,
+        val amountUsd: Double,
+        val reason: String
+    ) : TradeEvent()
+
+    /** معامله تمام شد (صدای دوم + لرزش). */
+    data class Completed(
+        override val symbol: String,
+        override val market: MarketKind,
+        override val side: String,
+        val success: Boolean,
+        val message: String,
+        val pnlUsd: Double? = null
+    ) : TradeEvent()
+}
 
 /** گزارش یک دور بررسی بازار توسط موتور. */
 data class CycleReport(

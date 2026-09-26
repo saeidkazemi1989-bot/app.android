@@ -46,7 +46,9 @@ class IranStockSource {
         val bidPrice: Double,
         val bidQty: Double,
         val askPrice: Double,
-        val askQty: Double
+        val askQty: Double,
+        /** کد گروه صنعت (مثلاً «۲۷» فلزات اساسی) برای مقایسه P/E با هم‌گروه‌ها. */
+        val sector: String = ""
     ) {
         val isStock: Boolean get() = isin.startsWith("IRO1") || isin.startsWith("IRO3")
 
@@ -62,7 +64,52 @@ class IranStockSource {
     }
 
     /** یک روز از تاریخچه رسمی. */
-    data class DailyRow(val dEven: Int, val close: Double, val yesterday: Double)
+    data class DailyRow(val dEven: Int, val close: Double, val yesterday: Double, val volume: Double = 0.0, val value: Double = 0.0)
+
+    /**
+     * معاملات حقیقی/حقوقی یک روز (حجم، ارزش ریالی و تعداد کد). منبع: ClientType در TSETMC.
+     * «حقیقی» = اشخاص عادی، «حقوقی» = نهادها و صندوق‌ها.
+     */
+    data class ClientFlow(
+        val date: Int,
+        val buyIVol: Double,
+        val sellIVol: Double,
+        val buyNVol: Double,
+        val sellNVol: Double,
+        val buyICount: Double,
+        val sellICount: Double,
+        val buyIValue: Double = 0.0,
+        val sellIValue: Double = 0.0
+    ) {
+        /** قدرت خریدار حقیقی = سرانه خرید هر کد حقیقی ÷ سرانه فروش هر کد حقیقی. */
+        val buyerPower: Double?
+            get() = if (buyICount > 0 && sellICount > 0 && buyIVol > 0 && sellIVol > 0)
+                (buyIVol / buyICount) / (sellIVol / sellICount) else null
+
+        /** سهم «ورود پول حقیقی» از کل حجم (مثبت: حقوقی به حقیقی فروخته؛ منفی: خروج پول حقیقی). */
+        val realNetShare: Double?
+            get() {
+                val total = buyIVol + buyNVol
+                return if (total > 0) (buyIVol - sellIVol) / total else null
+            }
+
+        /** خالص ورود پول حقیقی به ریال (اگر ارزش در داده نباشد، با قیمت تقریبی حساب می‌شود). */
+        fun realNetValue(price: Double): Double =
+            if (buyIValue > 0 || sellIValue > 0) buyIValue - sellIValue else (buyIVol - sellIVol) * price
+    }
+
+    /** آمار کل بازار سهام برای فیلتر «وضعیت بازار». */
+    data class MarketStats(
+        val advancers: Int,
+        val decliners: Int,
+        /** خالص ورود پول حقیقی به کل سهام (ریال). */
+        val realNetIrr: Double?,
+        val totalValueIrr: Double,
+        /** میانه P/E هر گروه صنعت. */
+        val sectorPe: Map<String, Double>
+    ) {
+        val breadth: Double? get() = if (advancers + decliners > 0) advancers.toDouble() / (advancers + decliners) else null
+    }
 
     class ScanResult(
         val assets: List<Asset>,
@@ -142,7 +189,8 @@ class IranStockSource {
                     bidPrice = bl?.num("pmd") ?: 0.0,
                     bidQty = bl?.num("qmd") ?: 0.0,
                     askPrice = bl?.num("pmo") ?: 0.0,
-                    askQty = bl?.num("qmo") ?: 0.0
+                    askQty = bl?.num("qmo") ?: 0.0,
+                    sector = o.str("csv").trim()
                 )
             }
         }
@@ -156,8 +204,88 @@ class IranStockSource {
                 val o = el.asJsonObject
                 val d = o.num("dEven").toInt()
                 val close = o.num("pClosing")
-                if (d <= 19000101 || close <= 0) null else DailyRow(d, close, o.num("priceYesterday"))
+                if (d <= 19000101 || close <= 0) null
+                else DailyRow(d, close, o.num("priceYesterday"), o.num("qTotTran5J"), o.num("qTotCap"))
             }.orEmpty().sortedBy { it.dEven }.distinctBy { it.dEven }
+        }
+
+        /** تجزیه ClientType/GetClientTypeAll (حقیقی/حقوقی امروز همه نمادها)، کلید: insCode. */
+        fun parseClientTypeAll(json: String, date: Int = 0): Map<String, ClientFlow> {
+            val root = JsonParser.parseString(json)
+            val arr = if (root.isJsonObject) root.asJsonObject.getAsJsonArray("clientTypeAllDto") else null
+            val out = HashMap<String, ClientFlow>()
+            arr?.forEach { el ->
+                if (!el.isJsonObject) return@forEach
+                val o = el.asJsonObject
+                val code = o.str("insCode").trim()
+                if (code.isEmpty()) return@forEach
+                out[code] = ClientFlow(
+                    date = date,
+                    buyIVol = o.num("buy_I_Volume"),
+                    sellIVol = o.num("sell_I_Volume"),
+                    buyNVol = o.num("buy_N_Volume"),
+                    sellNVol = o.num("sell_N_Volume"),
+                    buyICount = o.num("buy_CountI"),
+                    sellICount = o.num("sell_CountI")
+                )
+            }
+            return out
+        }
+
+        /** تجزیه ClientType/GetClientTypeHistory (تاریخچه حقیقی/حقوقی یک نماد)، جدیدترین روز اول. */
+        fun parseClientTypeHistory(json: String): List<ClientFlow> {
+            val root = JsonParser.parseString(json)
+            if (!root.isJsonObject) return emptyList()
+            val el = root.asJsonObject.get("clientType") ?: return emptyList()
+            val items = when {
+                el.isJsonArray -> el.asJsonArray.toList()
+                el.isJsonObject -> listOf(el)
+                else -> emptyList()
+            }
+            return items.mapNotNull { e ->
+                if (!e.isJsonObject) return@mapNotNull null
+                val o = e.asJsonObject
+                val d = o.num("recDate").toInt()
+                if (d <= 19000101) return@mapNotNull null
+                ClientFlow(
+                    date = d,
+                    buyIVol = o.num("buy_I_Volume"),
+                    sellIVol = o.num("sell_I_Volume"),
+                    buyNVol = o.num("buy_N_Volume"),
+                    sellNVol = o.num("sell_N_Volume"),
+                    buyICount = o.num("buy_I_Count"),
+                    sellICount = o.num("sell_I_Count"),
+                    buyIValue = o.num("buy_I_Value"),
+                    sellIValue = o.num("sell_I_Value")
+                )
+            }.sortedByDescending { it.date }.distinctBy { it.date }
+        }
+
+        /** آمار کل بازار از دیده‌بان و حقیقی/حقوقی امروز. */
+        fun marketStats(stocks: List<Quote>, flows: Map<String, ClientFlow>): MarketStats {
+            var adv = 0
+            var dec = 0
+            var net = 0.0
+            var withFlow = 0
+            for (q in stocks) {
+                val c = q.changePct ?: continue
+                if (q.trades <= 0) continue
+                if (c > 0.3) adv++ else if (c < -0.3) dec++
+                val f = flows[q.insCode]
+                if (f != null) {
+                    net += f.realNetValue(q.price)
+                    withFlow++
+                }
+            }
+            val sectorPe = stocks
+                .filter { (it.pe ?: 0.0) > 0 && (it.pe ?: 0.0) < 300 && it.sector.isNotEmpty() }
+                .groupBy { it.sector }
+                .filterValues { it.size >= 3 }
+                .mapValues { (_, qs) ->
+                    val v = qs.mapNotNull { it.pe }.sorted()
+                    if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2
+                }
+            return MarketStats(adv, dec, if (withFlow > 0) net else null, stocks.sumOf { it.valueIrr }, sectorPe)
         }
 
         /**
@@ -228,6 +356,40 @@ class IranStockSource {
     /** آخرین ردیف‌های تاریخچه (خام) هر نماد برای تشخیص افزایش سرمایه. */
     private val dailyRows = ConcurrentHashMap<String, List<DailyRow>>()
 
+    /** حقیقی/حقوقی امروز همه نمادها (کلید: شناسه دارایی). */
+    @Volatile
+    private var flows: Map<String, ClientFlow> = emptyMap()
+
+    @Volatile
+    private var flowsTs = 0L
+
+    /** تاریخچه حقیقی/حقوقی ۲۰ روز اخیر هر نماد (جدیدترین اول). */
+    private val flowHistory = ConcurrentHashMap<String, List<ClientFlow>>()
+
+    @Volatile
+    var stats: MarketStats? = null
+        private set
+
+    @Volatile
+    var flowError: String? = null
+        private set
+
+    fun flowOf(assetId: String): ClientFlow? = flows[assetId]
+
+    fun flowHistoryOf(assetId: String): List<ClientFlow> = flowHistory[assetId].orEmpty()
+
+    /** حقیقی/حقوقی امروز همه نمادها با همان کش دیده‌بان بازار. */
+    private suspend fun clientTypes(): Map<String, ClientFlow> {
+        val now = System.currentTimeMillis()
+        val ttl = if (IranMarket.isOpen(now)) 2 * 60_000L else 30 * 60_000L
+        if (flows.isNotEmpty() && now - flowsTs < ttl) return flows
+        val parsed = parseClientTypeAll(get(API + "ClientType/GetClientTypeAll"), IranMarket.todayInt())
+        if (parsed.isEmpty()) throw IllegalStateException("حقیقی/حقوقی خالی بود")
+        flows = parsed.mapKeys { "ir:" + it.key }
+        flowsTs = now
+        return flows
+    }
+
     @Volatile
     var lastError: String? = null
         private set
@@ -275,6 +437,13 @@ class IranStockSource {
             if (quotes.isNotEmpty()) quotes else return simulated(now)
         }
         val stocks = all.values.filter { it.isStock && it.price > 0 }
+        try {
+            clientTypes()
+            flowError = null
+        } catch (e: Exception) {
+            flowError = e.message ?: e.toString()
+        }
+        stats = marketStats(stocks, flows.mapKeys { it.key.removePrefix("ir:") })
         val liquid = stocks.filter { it.valueIrr >= MIN_VALUE_IRR || ("ir:" + it.insCode) in mustInclude }
             .sortedByDescending { it.valueIrr }
         val assets = liquid.mapIndexed { idx, q ->
@@ -333,8 +502,16 @@ class IranStockSource {
         val rows = parseDaily(get(API + "ClosingPrice/GetClosingPriceDailyList/$insCode/150"))
         if (rows.isEmpty()) return emptyList()
         dailyRows[asset.id] = rows.takeLast(10)
-        val adjusted = adjust(rows).map { (d, p) -> PricePoint(IranMarket.dayStartMs(d) + 12 * 3_600_000L, p) }
-            .toMutableList()
+        // تاریخچه ورود/خروج پول حقیقی (۲۰ روز)؛ شکستش مانع تحلیل نمی‌شود.
+        try {
+            val fh = parseClientTypeHistory(get(API + "ClientType/GetClientTypeHistory/$insCode")).take(20)
+            if (fh.isNotEmpty()) flowHistory[asset.id] = fh
+        } catch (_: Exception) {
+        }
+        val adj = adjust(rows)
+        val adjusted = adj.mapIndexed { i, (d, p) ->
+            PricePoint(IranMarket.dayStartMs(d) + 12 * 3_600_000L, p, rows[i].volume)
+        }.toMutableList()
         // اگر امروز معامله شده ولی هنوز در تاریخچه رسمی نیامده، قیمت زنده را به‌عنوان آخرین نقطه اضافه کن.
         val today = IranMarket.todayInt()
         val q = quotes[asset.id]
@@ -348,7 +525,7 @@ class IranStockSource {
             if (kotlin.math.abs(f - 1) > 0.002 && f > 0.1 && f < 1.5) {
                 for (i in adjusted.indices) adjusted[i] = adjusted[i].copy(price = adjusted[i].price * f)
             }
-            adjusted.add(PricePoint(System.currentTimeMillis(), q.price))
+            adjusted.add(PricePoint(System.currentTimeMillis(), q.price, q.volume))
         }
         return adjusted
     }

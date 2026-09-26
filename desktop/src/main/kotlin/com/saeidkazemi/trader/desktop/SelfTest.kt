@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skia.EncodedImageFormat
@@ -53,6 +54,13 @@ fun runSelfTest(outDir: File): Int {
                 dataLocation = dataDir.absolutePath
             )
         })
+        val evStart = java.util.concurrent.atomic.AtomicInteger()
+        val evDone = java.util.concurrent.atomic.AtomicInteger()
+        scope.launch {
+            container.tradeEngine.events.collect { e ->
+                if (e is com.saeidkazemi.trader.data.model.TradeEvent.Starting) evStart.incrementAndGet() else evDone.incrementAndGet()
+            }
+        }
         controller.start()
         runBlocking {
             withTimeoutOrNull(150_000) {
@@ -80,6 +88,22 @@ fun runSelfTest(outDir: File): Int {
             out("  ${it.symbol} score=${it.score} tech=${it.technicalScore} news=${it.newsAdj} (${it.newsCount}) ${it.action} blocked=${it.newsBlocked}")
         }
         out("positions=${st.account.positions.map { it.symbol }} cash=${st.account.cashUsd}")
+        out("sleeves " + st.sleeves().joinToString(" | ") { sl ->
+            "${sl.market} ${"%.0f".format(sl.allocationPct)}% cash=${"%.0f".format(sl.cashUsd)} pos=${sl.positions} eq=${"%.0f".format(sl.equityUsd)}"
+        })
+        out("events start=${evStart.get()} done=${evDone.get()}")
+        val fg = container.marketDataService.insights.cachedFearGreed()
+        out("pro fng=${fg?.value} (${fg?.label}) iranStats=${container.marketDataService.iranStats?.let { "breadth=${it.breadth} net=${it.realNetIrr}" }} flowErr=${container.marketDataService.iranFlowError?.take(60)}")
+        st.signals.filter { it.proFactors.isNotEmpty() }.take(3).forEach { sg ->
+            out("pro ${sg.symbol} adj=${sg.proAdj} blocked=${sg.proBlocked} " + sg.proFactors.joinToString("; ") { f -> f.title + "=" + f.impact })
+        }
+        listOf("trade_start", "trade_done").forEach { n ->
+            val ok = try {
+                val r = SoundAlerts::class.java.classLoader.getResourceAsStream("sounds/$n.wav")
+                r != null && javax.sound.sampled.AudioSystem.getAudioInputStream(java.io.BufferedInputStream(r)).frameLength > 1000
+            } catch (e: Throwable) { false }
+            out("sound $n ok=$ok")
+        }
         out("newsFeed=${st.newsFeed.size} digests=${st.newsDigests.size}")
 
         val probe = listOfNotNull(
@@ -138,6 +162,29 @@ fun runSelfTest(outDir: File): Int {
                 val s by controller.state.collectAsState()
                 AssetDetailScreen(a.id, s, onBuy = { _, _ -> }, onSell = {}, onBack = {})
             }
+        }
+        st.assets.firstOrNull { it.id == "bitcoin" }?.let { a ->
+            controller.openAsset(a.id)
+            runBlocking {
+                withTimeoutOrNull(60_000) {
+                    while (controller.state.value.detail?.asset?.id != a.id || controller.state.value.detail?.newsLoading != false) delay(300)
+                }
+            }
+            controller.state.value.detail?.signal?.let { sg ->
+                out("pro detail ${sg.symbol} adj=${sg.proAdj} " + sg.proFactors.joinToString("; ") { f -> f.title + " " + f.value + " " + f.impact })
+            }
+            shot("5-detail-btc", 1100, 2400) {
+                val s by controller.state.collectAsState()
+                AssetDetailScreen(a.id, s, onBuy = { _, _ -> }, onSell = {}, onBack = {})
+            }
+        }
+        shot("6-settings", 1100, 3200) {
+            val s by controller.state.collectAsState()
+            com.saeidkazemi.trader.ui.screens.SettingsScreen(s, controller)
+        }
+        shot("7-portfolio", 1100, 1600) {
+            val s by controller.state.collectAsState()
+            com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
         }
     } catch (e: Throwable) {
         out("SELFTEST CRASH: $e")

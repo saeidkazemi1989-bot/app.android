@@ -19,6 +19,7 @@ class MarketDataService {
     private val goldSource = GoldSource()
     private val erSource = ErSource()
     private val iranSource = IranStockSource()
+    val insights = InsightSource()
 
     @Volatile
     private var lastAssets: List<Asset> = emptyList()
@@ -65,6 +66,20 @@ class MarketDataService {
     fun iranQuote(assetId: String): IranStockSource.Quote? = iranSource.quote(assetId)
 
     fun iranAdjustment(assetId: String): Pair<Int, Double>? = iranSource.adjustmentFor(assetId)
+
+    /** حقیقی/حقوقی امروز یک سهم. */
+    fun iranFlow(assetId: String): IranStockSource.ClientFlow? = iranSource.flowOf(assetId)
+
+    /** تاریخچه ورود/خروج پول حقیقی یک سهم (جدیدترین اول). */
+    fun iranFlowHistory(assetId: String): List<IranStockSource.ClientFlow> = iranSource.flowHistoryOf(assetId)
+
+    /** آمار کل بازار سهام (سهم نمادهای مثبت، ورود پول حقیقی کل، P/E گروه‌ها). */
+    val iranStats: IranStockSource.MarketStats? get() = iranSource.stats
+
+    val iranFlowError: String? get() = iranSource.flowError
+
+    /** تاریخچه کش‌شده (بدون درخواست شبکه). */
+    fun cachedHistory(assetId: String): List<PricePoint>? = historyCache[assetId]?.points
 
     /** آیا تاریخچه تازه این دارایی در کش هست (بدون درخواست شبکه)؟ */
     fun hasFreshHistory(asset: Asset): Boolean {

@@ -37,6 +37,12 @@ class TraderController(
         fun onAutoTradeChanged(on: Boolean) {}
         fun onCycleReport(report: CycleReport) {}
         fun setAutostart(on: Boolean): Boolean = false
+
+        /** درخواست معافیت از بهینه‌سازی باتری (اندروید) تا با قفل بودن گوشی هم کار کند. */
+        fun requestBatteryExemption() {}
+
+        /** باز کردن تنظیمات برنامه در سیستم (برای اجرای خودکار/باتری در گوشی‌های شیائومی، هواوی، …). */
+        fun openAppSettings() {}
     }
 
     private val _state = MutableStateFlow(UiState(platform = hooks.platformInfo()))
@@ -173,7 +179,67 @@ class TraderController(
         toast(if (on) "بررسی اخبار و کدال فعال شد." else "بررسی اخبار غیرفعال شد؛ فقط تحلیل تکنیکال.")
     }
 
-    fun setRiskLevel(level: String) = updateSettings { it.copy(riskLevel = level) }
+    fun setRiskLevel(level: String) = updateSettings { s ->
+        s.copy(riskLevel = level, marketRisk = s.marketRisk.mapValues { level })
+    }
+
+    /** سطح ریسک جداگانه یک بازار. */
+    fun setMarketRisk(market: com.saeidkazemi.trader.data.model.MarketKind, level: String) =
+        updateSettings { it.copy(marketRisk = it.marketRisk + (market.name to level)) }
+
+    fun toggleProAnalysis(on: Boolean) {
+        updateSettings { it.copy(proAnalysis = on) }
+        toast(if (on) "تحلیل تخصصی (جریان پول، حجم، ارزش‌گذاری، ترس و طمع، …) فعال شد." else "تحلیل تخصصی غیرفعال شد.")
+    }
+
+    fun toggleSound(on: Boolean) = updateSettings { it.copy(soundAlerts = on) }
+
+    fun toggleVibrate(on: Boolean) = updateSettings { it.copy(vibrateAlerts = on) }
+
+    fun toggleLoud(on: Boolean) = updateSettings { it.copy(loudAlerts = on) }
+
+    /** پخش آزمایشی هر دو صدا (و لرزش) بدون انجام معامله. */
+    fun testAlert() {
+        scope.launch(Dispatchers.IO) { container.tradeEngine.testAlert() }
+    }
+
+    fun requestBatteryExemption() {
+        hooks.requestBatteryExemption()
+    }
+
+    fun openAppSettings() {
+        hooks.openAppSettings()
+    }
+
+    /** وضعیت پلتفرم (مثلاً معافیت باتری) پس از بازگشت به برنامه دوباره خوانده می‌شود. */
+    fun refreshPlatform() {
+        _state.update { it.copy(platform = hooks.platformInfo()) }
+    }
+
+    /**
+     * تقسیم سرمایه بین بازارها (درصد). چون هر بازار صندوق جداگانه دارد، حساب دمو با همان سرمایه
+     * و تقسیم‌بندی جدید از نو ساخته می‌شود.
+     */
+    fun setAllocationsAndReset(crypto: Double, ir: Double, fx: Double) {
+        val vals = listOf(crypto, ir, fx)
+        if (vals.any { !it.isFinite() || it < 0 }) {
+            toast("درصدهای معتبر وارد کنید.")
+            return
+        }
+        val sum = vals.sum()
+        if (sum < 99.5 || sum > 100.5) {
+            toast("جمع درصدها باید ۱۰۰ باشد (الان " + com.saeidkazemi.trader.util.Format.num(sum, 1) + ").")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val alloc = mapOf("CRYPTO" to crypto, "IR_STOCK" to ir, "FX" to fx)
+            val settings = container.store.loadSettings().copy(allocations = alloc)
+            container.store.saveSettings(settings)
+            container.broker.reset(settings.capitalUsd, alloc)
+            _state.update { it.copy(settings = settings, account = container.broker.account()) }
+            toast("سرمایه بین بازارها تقسیم شد و حساب دمو از نو ساخته شد.")
+        }
+    }
 
     fun setFeePct(pct: Double) {
         if (!pct.isFinite()) return
@@ -189,7 +255,7 @@ class TraderController(
         scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings().copy(capitalUsd = amountUsd)
             container.store.saveSettings(settings)
-            container.broker.reset(amountUsd)
+            container.broker.reset(amountUsd, settings.allocations)
             _state.update { it.copy(settings = settings, account = container.broker.account()) }
             toast("حساب دمو با سرمایه جدید از نو ساخته شد.")
         }
@@ -271,7 +337,11 @@ class TraderController(
                 emptyList()
             }
             val cachedNews = container.newsService.cached(assetId)
-            val signal = container.strategyEngine.analyze(asset, history, settings, cachedNews)
+            val signal = try {
+                container.tradeEngine.analyzeFull(asset, history, cachedNews)
+            } catch (e: Exception) {
+                container.strategyEngine.analyze(asset, history, settings, cachedNews)
+            }
             val held = container.broker.account().positions.any { it.assetId == assetId }
             val usdPrice = container.marketDataService.usdPriceOf(asset, settings)
             _state.update {
@@ -290,7 +360,11 @@ class TraderController(
             } catch (e: Exception) {
                 null
             }
-            val signal2 = container.strategyEngine.analyze(asset, history, settings, digest)
+            val signal2 = try {
+                container.tradeEngine.analyzeFull(asset, history, digest)
+            } catch (e: Exception) {
+                container.strategyEngine.analyze(asset, history, settings, digest)
+            }
             _state.update { s ->
                 val d = s.detail
                 if (d == null || d.asset.id != assetId) s

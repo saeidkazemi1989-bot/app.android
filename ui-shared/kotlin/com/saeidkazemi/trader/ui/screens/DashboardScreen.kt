@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.saeidkazemi.trader.data.model.Action
 import com.saeidkazemi.trader.ui.UiState
 import com.saeidkazemi.trader.ui.components.NewsItemRow
+import com.saeidkazemi.trader.ui.components.SleevesCard
 import com.saeidkazemi.trader.ui.components.InfoCard
 import com.saeidkazemi.trader.ui.components.SectionTitle
 import com.saeidkazemi.trader.ui.components.SimBadge
@@ -113,6 +114,8 @@ fun DashboardScreen(
                     )
                 }
             }
+
+            SleevesCard(state = state, detailed = false, modifier = Modifier.padding(top = 12.dp))
 
             // معامله خودکار
             Column(

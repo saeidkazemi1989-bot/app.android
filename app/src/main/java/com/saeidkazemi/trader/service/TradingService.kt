@@ -1,11 +1,15 @@
 package com.saeidkazemi.trader.service
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -27,14 +31,60 @@ import kotlin.coroutines.coroutineContext
 /**
  * سرویس پیش‌زمینه برای معامله‌گری خودکار: هر ۶۰ ثانیه یک دور کامل
  * (به‌روزرسانی بازار، تحلیل، اعمال حد ضرر/حد سود، خرید و فروش خودکار) اجرا می‌کند.
+ *
+ * برای اینکه با قفل شدن گوشی و خاموش شدن صفحه متوقف نشود:
+ * - قفل پردازنده (PARTIAL_WAKE_LOCK) و قفل وای‌فای در تمام مدت اجرای سرویس نگه داشته می‌شود؛
+ * - START_STICKY + راه‌اندازی مجدد پس از بسته شدن از لیست برنامه‌های اخیر (onTaskRemoved)؛
+ * - نگهبان AlarmManager هر ۱۵ دقیقه (حتی در Doze) و اجرای خودکار پس از روشن شدن گوشی.
  */
 class TradingService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var loopStarted = false
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        running = true
+        acquireLocks()
+    }
+
+    private fun acquireLocks() {
+        try {
+            if (wakeLock?.isHeld != true) {
+                val pm = getSystemService(PowerManager::class.java)
+                wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MoameleYar:trading")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            if (wifiLock?.isHeld != true) {
+                val wm = applicationContext.getSystemService(WifiManager::class.java)
+                @Suppress("DEPRECATION")
+                wifiLock = wm?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "MoameleYar:net")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseLocks() {
+        try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) { }
+        try { wifiLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) { }
+        wakeLock = null
+        wifiLock = null
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification("در حال پایش بازارها…"))
+        acquireLocks()
+        Watchdog.schedule(this)
         if (!loopStarted) {
             loopStarted = true
             scope.launch { loop() }
@@ -93,7 +143,7 @@ class TradingService : Service() {
             val lines = mutableListOf<String>()
             if (report.buys.isNotEmpty()) lines.add("خرید: " + report.buys.joinToString("، "))
             if (report.sells.isNotEmpty()) lines.add("فروش: " + report.sells.joinToString("، "))
-            val notif = NotificationCompat.Builder(this, AppContainer.CHANNEL_TRADES)
+            val notif = NotificationCompat.Builder(this, TraderApp.CHANNEL_TRADES_QUIET)
                 .setSmallIcon(R.drawable.ic_stat_trader)
                 .setContentTitle("معامله خودکار انجام شد")
                 .setContentText(lines.joinToString(" | "))
@@ -107,8 +157,33 @@ class TradingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** اگر کاربر برنامه را از لیست برنامه‌های اخیر ببندد، سرویس چند ثانیه بعد دوباره اجرا می‌شود. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleRestart(3_000L)
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun scheduleRestart(delayMs: Long) {
+        try {
+            if (!TraderApp.instance.container.store.loadSettings().autoTrade) return
+            val intent = Intent(applicationContext, TradingService::class.java)
+            val pi = PendingIntent.getForegroundService(
+                applicationContext, 7, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val am = getSystemService(AlarmManager::class.java)
+            am?.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delayMs, pi)
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onDestroy() {
+        running = false
         scope.cancel()
+        releaseLocks()
+        // اگر سیستم سرویس را بست ولی معامله خودکار روشن است، دوباره اجرا شود.
+        if (!stoppedByUser) scheduleRestart(10_000L)
+        stoppedByUser = false
         super.onDestroy()
     }
 
@@ -116,6 +191,14 @@ class TradingService : Service() {
         private const val NOTIF_ID = 1001
         private const val NOTIF_TRADES = 1002
         private const val CYCLE_MS = 60_000L
+
+        /** سرویس در این پروسه در حال اجراست (برای نگهبان). */
+        @Volatile
+        var running = false
+            private set
+
+        @Volatile
+        private var stoppedByUser = false
 
         fun start(context: Context) {
             val intent = Intent(context, TradingService::class.java)
@@ -126,6 +209,7 @@ class TradingService : Service() {
         }
 
         fun stop(context: Context) {
+            stoppedByUser = true
             try {
                 context.stopService(Intent(context, TradingService::class.java))
             } catch (_: Exception) {
