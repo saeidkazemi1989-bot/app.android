@@ -33,7 +33,8 @@ class IranStockTests {
         assertFalse(iran.buyQueue)
 
         val melat = quotes.getValue("وبملت")
-        assertFalse(melat.buyQueue, "روی سقف است ولی فروشنده دارد")
+        assertTrue(melat.buyQueue, "تقاضا روی سقف ۲٬۳۴۸؛ عرضه ۳٬۳۹۰ بالاتر از سقف مجاز است و امروز اجرا نمی‌شود → صف خرید")
+        assertEquals(null, melat.validAsk)
         assertEquals(2.1, melat.pe)
 
         val bond = quotes.values.first { it.isin.startsWith("IRB") }
