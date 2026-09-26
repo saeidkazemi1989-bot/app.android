@@ -245,6 +245,67 @@ class TradeEngine(
         }
     }
 
+    /** روند کلی هر بازار (شاخص هم‌وزن، پهنای بازار، پیش‌بینی) از داده‌های کش‌شده. */
+    fun marketTrends(): List<com.saeidkazemi.trader.analysis.MarketTrendReport> {
+        val all = market.cachedAssets()
+        val settings = store.loadSettings()
+        return listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).mapNotNull { m ->
+            try {
+                val list = all.filter { it.market == m && !it.isDisplayOnly }
+                val live = list.filter { !it.isSimulated }
+                val use = if (live.isNotEmpty()) live else list
+                val hist = use.associate { it.id to market.cachedHistory(it.id).orEmpty() }
+                com.saeidkazemi.trader.analysis.MarketTrend.build(m, use, hist, marketFacts(m, settings))
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun marketFacts(m: MarketKind, settings: AppSettings): List<String> {
+        val f = ArrayList<String>()
+        when (m) {
+            MarketKind.CRYPTO -> {
+                market.insights.cachedFearGreed()?.let { g ->
+                    f.add("شاخص ترس و طمع: " + g.value + " (" + (fearGreedFa(g.label) ?: g.label) + ")" +
+                        when {
+                            g.value <= 25 -> " — ترس زیاد؛ معمولاً نزدیک کف‌ها"
+                            g.value >= 75 -> " — طمع زیاد؛ ریسک اصلاح بالاتر"
+                            else -> ""
+                        })
+                }
+                val btc = market.cachedHistory("bitcoin").orEmpty().filter { it.price > 0 }
+                if (btc.size >= 50) {
+                    val closes = btc.map { it.price }
+                    val s50 = closes.takeLast(50).average()
+                    val c30 = com.saeidkazemi.trader.analysis.MarketTrend.changeOver(btc, 30)
+                    f.add("بیت‌کوین " + (if (closes.last() > s50) "بالای" else "زیر") + " میانگین ۵۰ روزه" +
+                        (c30?.let { " • ۳۰ روز " + Format.pct(it) } ?: ""))
+                }
+            }
+            MarketKind.IR_STOCK -> {
+                val scan = market.lastIranScan
+                if (scan != null && !scan.live) f.add("⚠ TSETMC در دسترس نیست؛ روند بورس روی داده شبیه‌سازی‌شده است")
+                market.iranStats?.let { st ->
+                    val b = st.breadth
+                    f.add("امروز: " + st.advancers + " نماد مثبت، " + st.decliners + " نماد منفی" +
+                        (b?.let { " (" + Format.num(it * 100, 0) + "٪ مثبت)" } ?: ""))
+                    st.realNetIrr?.let { v ->
+                        f.add((if (v >= 0) "ورود" else "خروج") + " پول حقیقی کل بازار: " + Format.compactIrr(kotlin.math.abs(v) / 10) + " تومان")
+                    }
+                    if (st.totalValueIrr > 0) f.add("ارزش معاملات سهام: " + Format.compactIrr(st.totalValueIrr / 10) + " تومان")
+                }
+                if (scan != null && scan.live) f.add("صف خرید: " + scan.buyQueues + " • صف فروش: " + scan.sellQueues)
+            }
+            MarketKind.FX -> {
+                f.add("شاخص بالا رفتن یعنی ضعیف شدن دلار در برابر این ارزها (و برعکس)")
+                f.add("نرخ دلار بازار آزاد: " + Format.num(market.usdIrr(settings), 0) + " ریال" + (if (market.rateIsFallback()) " (پشتیبان)" else ""))
+            }
+            MarketKind.METAL -> {}
+        }
+        return f
+    }
+
     /** منابع اطلاعاتی که تصمیم هر بازار بر اساس آن‌ها گرفته می‌شود (برای ژورنال و نمایش). */
     fun sourcesFor(asset: Asset): List<String> {
         val sim = if (asset.isSimulated) listOf("⚠ داده شبیه‌سازی‌شده (منبع اصلی در دسترس نبود)") else emptyList()

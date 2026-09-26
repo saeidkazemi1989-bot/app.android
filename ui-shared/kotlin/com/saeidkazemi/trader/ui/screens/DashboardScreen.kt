@@ -117,6 +117,9 @@ fun DashboardScreen(
 
             SleevesCard(state = state, detailed = false, modifier = Modifier.padding(top = 12.dp))
 
+            // روند کلی هر بازار
+            com.saeidkazemi.trader.ui.components.MarketTrendsCard(state = state, modifier = Modifier.padding(top = 12.dp))
+
             // معامله خودکار
             Column(
                 modifier = Modifier

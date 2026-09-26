@@ -115,6 +115,10 @@ fun runSelfTest(outDir: File): Int {
             val perf = com.saeidkazemi.trader.analysis.Performance.report(j, container.store.loadSettings())
             out("perf closed=${perf.all.closed} winRate=${perf.all.winRate} guards=" + perf.guards.joinToString("; ") { it.market.name + ":" + it.active })
         }
+        container.tradeEngine.marketTrends().forEach { r ->
+            out("trend ${r.market.name} label=${r.trendLabel} score=${r.trendScore} c1=${r.change1d?.let { "%.2f".format(it) }} c7=${r.change7d?.let { "%.2f".format(it) }} c30=${r.change30d?.let { "%.2f".format(it) }} " +
+                "breadth=${r.breadthAboveSma20?.let { "%.2f".format(it) }} n=${r.constituents} pts=${r.index.size} fc=${r.forecast?.trendLabel} facts=${r.facts.size} sim=${r.simulated}")
+        }
         container.tradeEngine.outlooks().values.take(4).forEach { o ->
             val f = o.forecast
             out(
@@ -219,6 +223,14 @@ fun runSelfTest(outDir: File): Int {
             shot("9-portfolio-trend", 760, 1300) {
                 val s by controller.state.collectAsState()
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
+            }
+        }
+        shot("12-market-trend", 760, 2100) {
+            val s by controller.state.collectAsState()
+            androidx.compose.foundation.layout.Column {
+                listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).forEach { k ->
+                    com.saeidkazemi.trader.ui.components.MarketTrendsCard(s, androidx.compose.ui.Modifier.padding(bottom = 10.dp), only = k)
+                }
             }
         }
         shot("11-journal", 760, 2400) {

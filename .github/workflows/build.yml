@@ -110,7 +110,7 @@ jobs:
           if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(journal |perf |outlook |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(trend |journal |perf |outlook |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
       - name: Publish trend screenshots as git blobs (for review via API)
         if: always()
@@ -119,7 +119,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          foreach ($n in @("11-journal", "8-position-trend")) {
+          foreach ($n in @("12-market-trend", "11-journal", "8-position-trend")) {
             $f = "selftest/$n.png"
             if (Test-Path $f) {
               $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f))

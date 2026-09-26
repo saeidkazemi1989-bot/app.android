@@ -87,6 +87,11 @@ fun MarketsScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (kind != null && kind != MarketKind.METAL && query.isBlank()) {
+                    item(key = "trend_" + kind.name) {
+                        com.saeidkazemi.trader.ui.components.MarketTrendsCard(state = state, only = kind)
+                    }
+                }
                 items(list, key = { it.id }) { asset ->
                     MarketRow(asset = asset, onClick = { onOpenAsset(asset.id) })
                 }

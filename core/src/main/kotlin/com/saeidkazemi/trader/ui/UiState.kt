@@ -87,7 +87,9 @@ data class UiState(
     /** ژورنال معاملات (جدیدترین اول). */
     val journal: List<com.saeidkazemi.trader.data.model.JournalEntry> = emptyList(),
     /** پنل سودآوری: نرخ برد، ضریب سود، امید ریاضی، … */
-    val perf: com.saeidkazemi.trader.analysis.PerfReport = com.saeidkazemi.trader.analysis.PerfReport()
+    val perf: com.saeidkazemi.trader.analysis.PerfReport = com.saeidkazemi.trader.analysis.PerfReport(),
+    /** روند کلی هر بازار. */
+    val marketTrends: List<com.saeidkazemi.trader.analysis.MarketTrendReport> = emptyList()
 ) {
     val equityUsd: Double
         get() = account.cashUsd + account.positions.sumOf { p ->

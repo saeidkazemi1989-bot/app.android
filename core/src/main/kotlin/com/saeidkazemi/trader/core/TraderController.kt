@@ -108,6 +108,7 @@ class TraderController(
         for (a in assets) priceMap[a.id] = market.usdPriceOf(a, settings)
         val digests = container.tradeEngine.cachedNews().associateBy { it.assetId }
         val journal = container.tradeEngine.journal.all()
+        val trends = container.tradeEngine.marketTrends()
         _state.update {
             it.copy(
                 loading = false,
@@ -126,7 +127,8 @@ class TraderController(
                 newsFeed = buildFeed(digests),
                 outlooks = container.tradeEngine.outlooks(),
                 journal = journal,
-                perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings)
+                perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings),
+                marketTrends = trends
             )
         }
     }
