@@ -31,6 +31,17 @@ class PositionTracker(private val store: JsonStore?) {
         return loaded
     }
 
+    /** پاک کردن مسیر یک موقعیت (از نو با نقطه خرید شروع می‌شود). */
+    fun clear(assetId: String) {
+        synchronized(lock) {
+            ensure().remove(assetId)
+            try {
+                store?.saveTracks(ensure())
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun track(assetId: String): List<PricePoint> = synchronized(lock) { ensure()[assetId]?.toList().orEmpty() }
 
     /** ثبت قیمت فعلی همه موقعیت‌های باز و حذف مسیر موقعیت‌های بسته‌شده. */

@@ -76,7 +76,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
         stopLossUsd: Double,
         takeProfitUsd: Double,
         reason: String,
-        trailPct: Double = 0.0
+        trailPct: Double = 0.0,
+        fxRate: Double = 0.0
     ): Trade? = synchronized(lock) {
         val a = ensure()
         if (!usdPrice.isFinite() || usdPrice <= 0 || usdAmount <= 0) return@synchronized null
@@ -101,7 +102,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
             takeProfitUsd = takeProfitUsd,
             peakUsd = usdPrice,
             trailPct = trailPct,
-            costUsd = usdAmount
+            costUsd = usdAmount,
+            fxRate = if (fxRate.isFinite() && fxRate > 0) fxRate else 0.0
         )
         val trade = Trade(
             id = shortId(),
@@ -181,6 +183,18 @@ class PaperBroker(private val store: JsonStore) : Broker {
             adjDay = day
         )
         val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) adjusted else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
+    /** ثبت نرخ دلار ثابت برای موقعیت‌های ریالی قدیمی (قبل از نسخه ۱.۵.۲). */
+    fun setFxRate(assetId: String, rate: Double): Boolean = synchronized(lock) {
+        if (!rate.isFinite() || rate <= 0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if (pos.fxRate > 0) return@synchronized false
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) it.copy(fxRate = rate) else it })
         acc = next
         store.saveAccount(next)
         true

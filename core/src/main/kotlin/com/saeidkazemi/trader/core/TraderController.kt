@@ -105,7 +105,8 @@ class TraderController(
         val market = container.marketDataService
         val assets = market.cachedAssets()
         val priceMap = HashMap<String, Double>()
-        for (a in assets) priceMap[a.id] = market.usdPriceOf(a, settings)
+        val heldNow = container.broker.account().positions
+        for (a in assets) priceMap[a.id] = container.tradeEngine.usdPriceFor(a, settings, heldNow)
         val digests = container.tradeEngine.cachedNews().associateBy { it.assetId }
         val journal = container.tradeEngine.journal.all()
         val trends = container.tradeEngine.marketTrends()
@@ -407,7 +408,7 @@ class TraderController(
                 container.strategyEngine.analyze(asset, history, settings, cachedNews)
             }
             val held = container.broker.account().positions.any { it.assetId == assetId }
-            val usdPrice = container.marketDataService.usdPriceOf(asset, settings)
+            val usdPrice = container.tradeEngine.usdPriceFor(asset, settings)
             val factor = if (asset.price > 0) usdPrice / asset.price else 1.0
             val forecast = try {
                 com.saeidkazemi.trader.analysis.Forecast.build(

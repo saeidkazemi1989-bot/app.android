@@ -52,15 +52,31 @@ class IranStockSource {
     ) {
         val isStock: Boolean get() = isin.startsWith("IRO1") || isin.startsWith("IRO3")
 
-        /** صف خرید: بهترین تقاضا روی سقف مجاز و هیچ فروشنده‌ای نیست → عملاً نمی‌شود خرید. */
-        val buyQueue: Boolean get() = maxAllowed > 0 && bidPrice >= maxAllowed && askQty <= 0
+        private fun inRange(p: Double): Boolean =
+            p > 0 && (minAllowed <= 0 || p >= minAllowed) && (maxAllowed <= 0 || p <= maxAllowed)
 
-        /** صف فروش: بهترین عرضه روی کف مجاز و هیچ خریداری نیست → عملاً نمی‌شود فروخت. */
-        val sellQueue: Boolean get() = minAllowed > 0 && askPrice > 0 && askPrice <= minAllowed && bidQty <= 0
+        /** بهترین تقاضای «قابل معامله امروز» (سفارش زیر کف مجاز امروز اجرا نمی‌شود). */
+        val validBid: Double? get() = bidPrice.takeIf { bidQty > 0 && inRange(it) }
+
+        /** بهترین عرضه قابل معامله امروز. */
+        val validAsk: Double? get() = askPrice.takeIf { askQty > 0 && inRange(it) }
+
+        /** صف خرید: بهترین تقاضا روی سقف مجاز و فروشنده‌ای در محدوده مجاز نیست → عملاً نمی‌شود خرید. */
+        val buyQueue: Boolean get() = maxAllowed > 0 && bidPrice >= maxAllowed && validAsk == null
+
+        /**
+         * صف فروش: بهترین عرضه روی کف مجاز و خریدار قابل معامله‌ای نیست → عملاً نمی‌شود فروخت.
+         * (سفارش‌های خرید زیر کف مجاز، مثل ۹٬۳۵۰ وقتی کف ۹٬۶۲۰ است، امروز اجرا نمی‌شوند و خریدار حساب نمی‌شوند.)
+         */
+        val sellQueue: Boolean get() = minAllowed > 0 && askPrice > 0 && askPrice <= minAllowed && validBid == null
 
         val price: Double get() = if (last > 0) last else close
 
-        val changePct: Double? get() = if (yesterday > 0 && close > 0) (close / yesterday - 1) * 100 else null
+        /** تغییر آخرین قیمت معامله نسبت به قیمت پایانی دیروز (همان «آخرین» در سامانه کارگزاری). */
+        val changePct: Double? get() = if (yesterday > 0 && price > 0) (price / yesterday - 1) * 100 else null
+
+        /** تغییر قیمت پایانی (میانگین وزنی) نسبت به دیروز. */
+        val closeChangePct: Double? get() = if (yesterday > 0 && close > 0) (close / yesterday - 1) * 100 else null
     }
 
     /** یک روز از تاریخچه رسمی. */
@@ -462,8 +478,8 @@ class IranStockSource {
                 sellQueue = q.sellQueue,
                 tradeValue = q.valueIrr,
                 farabourse = q.isin.startsWith("IRO3"),
-                bidPrice = q.bidPrice.takeIf { it > 0 },
-                askPrice = q.askPrice.takeIf { it > 0 }
+                bidPrice = q.validBid,
+                askPrice = q.validAsk
             )
         }
         return ScanResult(

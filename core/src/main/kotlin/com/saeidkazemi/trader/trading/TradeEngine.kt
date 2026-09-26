@@ -192,6 +192,36 @@ class TradeEngine(
         _events.tryEmit(TradeEvent.Completed("TEST", MarketKind.CRYPTO, "TEST", true, "آزمایش هشدار انجام شد"))
     }
 
+    /**
+     * قیمت دلاری یک دارایی برای دفتر حساب. سهام ریالی که در پرتفوی است با نرخ دلارِ ثابتِ لحظه خرید تبدیل می‌شود،
+     * تا سود/زیان و نمودار دقیقاً حرکت قیمت ریالی سهم را نشان دهد (نه نوسان دلار).
+     */
+    fun usdPriceFor(
+        asset: Asset,
+        settings: AppSettings,
+        positions: List<com.saeidkazemi.trader.data.model.Position> = broker.account().positions
+    ): Double {
+        if (asset.baseCurrency == "IRR") {
+            val rate = positions.firstOrNull { it.assetId == asset.id }?.fxRate ?: 0.0
+            if (rate > 0) return asset.price / rate
+        }
+        return market.usdPriceOf(asset, settings)
+    }
+
+    /** موقعیت‌های ریالی قدیمی: نرخ دلار لحظه خرید از ژورنال بازسازی و ثابت می‌شود. */
+    private fun migrateFxLocks(settings: AppSettings, notes: MutableList<String>) {
+        for (pos in broker.account().positions) {
+            if (pos.nativeCurrency != "IRR" || pos.fxRate > 0) continue
+            val e = journal.all().firstOrNull { it.assetId == pos.assetId && it.isOpen }
+            val fromJournal = e?.let { if (it.entryUsd > 0 && it.entryNative > 0) it.entryNative / it.entryUsd else it.usdIrr }
+            val rate = fromJournal?.takeIf { it.isFinite() && it > 1000 } ?: market.usdIrr(settings)
+            if (broker.setFxRate(pos.assetId, rate)) {
+                tracker.clear(pos.assetId)
+                notes.add("نرخ دلار موقعیت " + pos.symbol + " روی " + Format.num(rate, 0) + " ریال (لحظه خرید) ثابت شد؛ از این به بعد سود/زیان آن فقط با قیمت ریالی سهم تغییر می‌کند.")
+            }
+        }
+    }
+
     /** کارمزد رسمی هر بازار (نوبیتکس طبق پله کارمزد، بورس طبق مصوبه سازمان بورس، فارکس فرضی). */
     private fun feeFor(asset: Asset?, kind: MarketKind?, buy: Boolean, settings: AppSettings): Double =
         Fees.commission(asset, kind, buy, settings)
@@ -465,7 +495,7 @@ class TradeEngine(
         for (pos in broker.account().positions) {
             try {
                 val asset = assets[pos.assetId]
-                val cur = asset?.let { market.usdPriceOf(it, settings) } ?: pos.avgBuyUsd
+                val cur = asset?.let { usdPriceFor(it, settings) } ?: pos.avgBuyUsd
                 // تاریخچه به ارز خود دارایی است؛ با نسبت قیمت دلاری به قیمت اصلی به دلار تبدیل می‌شود.
                 val factor = if (asset != null && asset.price > 0) cur / asset.price else 1.0
                 val histUsd = market.cachedHistory(pos.assetId).orEmpty().map { PricePoint(it.t, it.price * factor) }
@@ -542,6 +572,8 @@ class TradeEngine(
         if (deferred.isNotEmpty()) {
             notes.add("تحلیل " + deferred.size + " سهم دیگر در دورهای بعدی انجام می‌شود (پویش تدریجی کل بازار).")
         }
+
+        migrateFxLocks(settings, notes)
 
         // اصلاح موقعیت‌های سهام پس از افزایش سرمایه/تقسیم سود (تا افت قیمت پس از مجمع، زیان کاذب یا حد ضرر نسازد).
         for (pos in broker.account().positions) {
@@ -639,7 +671,8 @@ class TradeEngine(
         }.sortedByDescending { it.score }
         lastSignals = signals
         val signalMap = signals.associateBy { it.assetId }
-        val priceMap = assets.associate { it.id to market.usdPriceOf(it, settings) }
+        val heldPositions = broker.account().positions
+        val priceMap = assets.associate { it.id to usdPriceFor(it, settings, heldPositions) }
 
         // ۵) حد ضرر متحرک: با هر قله تازه، حد ضرر بالا کشیده می‌شود تا سود قفل شود.
         broker.trail(priceMap)
@@ -730,6 +763,8 @@ class TradeEngine(
                     if (asset.isSimulated) continue
                     // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
                     if (irBlock(asset, buy = true) != null) continue
+                    // خرید خودکار سهمِ در صف فروش ممنوع: فروشنده‌ها روی کف قیمت صف کشیده‌اند و فروش بعدی ممکن است روزها طول بکشد.
+                    if (asset.sellQueue) continue
                     if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) continue
                     val usdPrice = priceMap[asset.id] ?: continue
                     if (!usdPrice.isFinite() || usdPrice <= 0) continue
@@ -752,7 +787,8 @@ class TradeEngine(
                         stopLossUsd = usdPrice * (1 - stopPct),
                         takeProfitUsd = usdPrice * (1 + plan.tpPct),
                         reason = reason,
-                        trailPct = plan.trailPct
+                        trailPct = plan.trailPct,
+                        fxRate = if (asset.baseCurrency == "IRR") usdIrr else 0.0
                     )
                     if (trade != null) {
                         buys.add(asset.symbol)
@@ -824,13 +860,14 @@ class TradeEngine(
             stopLossUsd = usdPrice * (1 - stopPct),
             takeProfitUsd = usdPrice * (1 + plan.tpPct),
             reason = "خرید دستی",
-            trailPct = plan.trailPct
+            trailPct = plan.trailPct,
+            fxRate = if (asset.baseCurrency == "IRR") market.usdIrr(settings) else 0.0
         )
         if (trade == null) {
             completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
             return "خرید انجام نشد."
         }
-        tracker.record(broker.account().positions, market.cachedAssets().associate { it.id to market.usdPriceOf(it, settings) })
+        tracker.record(broker.account().positions, market.cachedAssets().associate { it.id to usdPriceFor(it, settings) })
         ensureJournal()
         journalOpen(
             asset, trade, lastSignals.firstOrNull { it.assetId == assetId }, settings,
@@ -854,7 +891,7 @@ class TradeEngine(
         val pos = broker.account().positions.firstOrNull { it.assetId == assetId }
             ?: return "موقعیتی برای فروش ندارید."
         val asset = market.cachedAssets().firstOrNull { it.id == assetId }
-        val usdPrice = if (asset != null) market.usdPriceOf(asset, settings) else pos.avgBuyUsd
+        val usdPrice = if (asset != null) usdPriceFor(asset, settings) else pos.avgBuyUsd
         if (asset != null) irBlock(asset, buy = false)?.let { return "فروش ممکن نیست: " + it + "." }
         announce("SELL", pos.symbol, pos.market, pos.qty * usdPrice, "فروش دستی")
         val hs = halfSpread(asset, pos.market)

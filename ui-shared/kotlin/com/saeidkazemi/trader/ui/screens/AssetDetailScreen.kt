@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saeidkazemi.trader.data.model.Action
+import com.saeidkazemi.trader.data.model.MarketKind
 import com.saeidkazemi.trader.ui.UiState
 import com.saeidkazemi.trader.ui.components.EmptyBox
 import com.saeidkazemi.trader.ui.components.KVRow
@@ -130,7 +131,8 @@ fun AssetDetailScreen(
                 val change24 = asset.changePct24h
                 if (change24 != null) {
                     Text(
-                        "۲۴ ساعت: " + Format.pct(change24),
+                        (if (asset.market == MarketKind.IR_STOCK) "امروز (آخرین معامله نسبت به دیروز): " else "۲۴ ساعت: ") + Format.pct(change24) +
+                            (if (asset.market == MarketKind.IR_STOCK && asset.sellQueue) " • صف فروش" else if (asset.market == MarketKind.IR_STOCK && asset.buyQueue) " • صف خرید" else ""),
                         fontSize = 12.sp,
                         color = pnlColor(change24),
                         modifier = Modifier.padding(top = 2.dp)
