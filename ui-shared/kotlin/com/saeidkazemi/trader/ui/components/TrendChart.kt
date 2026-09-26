@@ -387,7 +387,11 @@ fun OutlookSummary(o: PositionOutlook, compact: Boolean = false) {
     val fc = o.forecast
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            (if (o.pnlPct >= 0) "الان در سود: " else "الان در زیان: ") + Format.pct(o.pnlPct) +
+            (when {
+                o.pnlPct > 0.005 -> "الان در سود: "
+                o.pnlPct < -0.005 -> "الان در زیان: "
+                else -> "الان سر به سر (بدون تغییر قیمت): "
+            }) + Format.pct(o.pnlPct) +
                 " • اگر همین الان بفروشد (پس از کارمزد): " + Format.pct(o.netPnlPct),
             fontSize = if (compact) 11.sp else 12.sp,
             fontWeight = FontWeight.Bold,

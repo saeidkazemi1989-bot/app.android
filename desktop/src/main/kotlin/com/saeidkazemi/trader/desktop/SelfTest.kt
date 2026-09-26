@@ -8,6 +8,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.LayoutDirection
 import com.saeidkazemi.trader.core.AppContainer
 import com.saeidkazemi.trader.core.TraderController
@@ -209,6 +211,36 @@ fun runSelfTest(outDir: File): Int {
             shot("9-portfolio-trend", 760, 1300) {
                 val s by controller.state.collectAsState()
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
+            }
+        }
+        // نمودار مصنوعی: قیمت اول زیر قیمت خرید رفته و بعد به سود رسیده (بررسی رنگ‌های سود/زیان و پیش‌بینی)
+        run {
+            val now = System.currentTimeMillis()
+            val day = 86_400_000L
+            val hist = (0 until 90).map { i ->
+                val t = now - (89 - i) * day
+                val p = 100.0 + 8 * Math.sin(i / 9.0) + i * 0.15
+                com.saeidkazemi.trader.data.model.PricePoint(t, p)
+            }
+            val buyT = now - 20 * day
+            val buyP = hist.first { it.t >= buyT }.price
+            val fc = com.saeidkazemi.trader.analysis.Forecast.build(hist, hist.last().price, now, score = 72)
+            out("synthetic buy=${"%.2f".format(buyP)} last=${"%.2f".format(hist.last().price)} fc=${fc?.trendLabel} exp=${fc?.expectedPct?.let { "%.2f".format(it) }}")
+            shot("10-synthetic-trend", 760, 420) {
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier.padding(16.dp)
+                ) {
+                    com.saeidkazemi.trader.ui.components.TrendChart(
+                        past = hist.filter { it.t >= now - 45 * day },
+                        forecast = fc,
+                        fmt = { "$" + com.saeidkazemi.trader.util.Format.price(it) },
+                        buyPrice = buyP,
+                        buyTime = buyT,
+                        stopPrice = buyP * 0.9,
+                        takeProfit = buyP * 1.2,
+                        height = 360.dp
+                    )
+                }
             }
         }
     } catch (e: Throwable) {
