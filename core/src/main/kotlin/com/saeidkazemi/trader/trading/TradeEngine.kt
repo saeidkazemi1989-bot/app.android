@@ -221,6 +221,162 @@ class TradeEngine(
     /** مسیر قیمت موقعیت‌های باز از لحظه خرید. */
     val tracker = PositionTracker(store)
 
+    /** ژورنال معاملات: دلایل و داده‌های هر خرید/فروش و نتیجه آن. */
+    val journal = TradeJournal(store)
+
+    @Volatile
+    private var journalBackfilled = false
+
+    private fun marketGuess(assetId: String): MarketKind =
+        market.cachedAssets().firstOrNull { it.id == assetId }?.market
+            ?: broker.account().positions.firstOrNull { it.assetId == assetId }?.market
+            ?: when {
+                assetId.startsWith("fx:") -> MarketKind.FX
+                assetId.startsWith("ir:") -> MarketKind.IR_STOCK
+                else -> MarketKind.CRYPTO
+            }
+
+    private fun ensureJournal() {
+        if (journalBackfilled) return
+        journalBackfilled = true
+        try {
+            journal.backfill(broker.account().trades) { marketGuess(it) }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** منابع اطلاعاتی که تصمیم هر بازار بر اساس آن‌ها گرفته می‌شود (برای ژورنال و نمایش). */
+    fun sourcesFor(asset: Asset): List<String> {
+        val sim = if (asset.isSimulated) listOf("⚠ داده شبیه‌سازی‌شده (منبع اصلی در دسترس نبود)") else emptyList()
+        return sim + com.saeidkazemi.trader.data.remote.DataSources.forMarket(asset.market)
+    }
+
+    private fun journalOpen(
+        asset: Asset,
+        trade: com.saeidkazemi.trader.data.model.Trade,
+        sig: Signal?,
+        settings: AppSettings,
+        stopUsd: Double,
+        tpUsd: Double,
+        trailPct: Double,
+        auto: Boolean,
+        threshold: Int?,
+        digest: NewsDigest?,
+        hist: List<PricePoint>,
+        guardNote: String?
+    ) {
+        try {
+            val factor = if (asset.price > 0) trade.priceUsd / asset.price else 1.0
+            val fc = com.saeidkazemi.trader.analysis.Forecast.build(
+                hist.map { PricePoint(it.t, it.price * factor) }, trade.priceUsd, score = sig?.score, simulated = asset.isSimulated
+            )
+            journal.open(
+                com.saeidkazemi.trader.data.model.JournalEntry(
+                    id = trade.id,
+                    assetId = asset.id,
+                    symbol = asset.symbol,
+                    name = asset.name,
+                    market = asset.market,
+                    auto = auto,
+                    mode = trade.mode,
+                    openedAt = trade.ts,
+                    entryUsd = trade.priceUsd,
+                    entryNative = asset.price,
+                    nativeCurrency = asset.baseCurrency,
+                    usdIrr = market.usdIrr(settings),
+                    amountUsd = trade.usdValue,
+                    buyFeeUsd = trade.feeUsd,
+                    qty = trade.qty,
+                    entryReason = trade.reason,
+                    score = sig?.score,
+                    technicalScore = sig?.technicalScore,
+                    newsAdj = sig?.newsAdj ?: 0,
+                    proAdj = sig?.proAdj ?: 0,
+                    threshold = threshold,
+                    reasons = sig?.reasons,
+                    proFactors = sig?.proFactors,
+                    metrics = sig?.metrics,
+                    newsLabel = digest?.label ?: sig?.newsLabel,
+                    newsHeadlines = digest?.items?.take(5)?.map { n ->
+                        "[" + n.kind.faTitle + " • " + n.sentimentLabel + "] " + n.title
+                    },
+                    newsSourcesOk = digest?.sourcesOk,
+                    newsSourcesFailed = digest?.sourcesFailed,
+                    dataSources = sourcesFor(asset),
+                    simulated = asset.isSimulated,
+                    stopUsd = stopUsd,
+                    takeProfitUsd = tpUsd,
+                    trailPct = trailPct,
+                    riskLevel = settings.riskFor(asset.market),
+                    forecastExpPct = fc?.expectedPct,
+                    forecastProbUp = fc?.probUp,
+                    guardNote = guardNote
+                )
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun journalClose(
+        pos: com.saeidkazemi.trader.data.model.Position,
+        asset: Asset?,
+        trade: com.saeidkazemi.trader.data.model.Trade,
+        reason: String,
+        sig: Signal?
+    ) {
+        try {
+            val track = tracker.track(pos.assetId).map { it.price }
+            val peak = maxOf(pos.peakUsd, track.maxOrNull() ?: 0.0, trade.priceUsd)
+            val trough = minOf(track.minOrNull() ?: pos.avgBuyUsd, trade.priceUsd)
+            val proceeds = trade.usdValue - trade.feeUsd
+            val change = { e: com.saeidkazemi.trader.data.model.JournalEntry ->
+                val cost = if (e.amountUsd > 0) e.amountUsd else pos.cost()
+                val pnl = proceeds - cost
+                e.copy(
+                    closedAt = trade.ts,
+                    exitUsd = trade.priceUsd,
+                    exitNative = asset?.price,
+                    exitReason = reason,
+                    exitScore = sig?.score,
+                    exitReasons = sig?.reasons?.take(8),
+                    proceedsUsd = proceeds,
+                    sellFeeUsd = trade.feeUsd,
+                    pnlUsd = pnl,
+                    pnlPct = if (cost > 0) pnl / cost * 100 else null,
+                    peakUsd = peak,
+                    troughUsd = trough,
+                    profitLockedPct = pos.profitLockedPct
+                )
+            }
+            if (!journal.close(pos.assetId, change)) {
+                // موقعیتی که قبل از ژورنال باز شده بود
+                journal.open(
+                    com.saeidkazemi.trader.data.model.JournalEntry(
+                        id = "p" + pos.openedAt,
+                        assetId = pos.assetId,
+                        symbol = pos.symbol,
+                        name = pos.name,
+                        market = pos.market,
+                        auto = false,
+                        mode = trade.mode,
+                        openedAt = pos.openedAt,
+                        entryUsd = pos.avgBuyUsd,
+                        entryNative = pos.avgBuyUsd,
+                        nativeCurrency = "USD",
+                        usdIrr = 0.0,
+                        amountUsd = pos.cost(),
+                        buyFeeUsd = 0.0,
+                        qty = pos.qty,
+                        entryReason = "نامشخص (قبل از ژورنال)",
+                        backfilled = true
+                    )
+                )
+                journal.close(pos.assetId, change)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     /**
      * چشم‌انداز همه موقعیت‌های باز: مسیر از خرید، سود/زیان فعلی و پیش‌بینی ۷ روز آینده.
      * فقط از داده‌های کش‌شده استفاده می‌کند (بدون درخواست شبکه).
@@ -258,6 +414,7 @@ class TradeEngine(
     }
 
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
+        ensureJournal()
         val settings = store.loadSettings()
         val buys = mutableListOf<String>()
         val sells = mutableListOf<String>()
@@ -462,7 +619,8 @@ class TradeEngine(
                 val trade = broker.sell(pos.assetId, curUsd, feeFor(asset, null, false, settings), reason)
                 if (trade != null) {
                     sells.add(pos.symbol)
-                    val pnl = trade.usdValue - trade.feeUsd - pos.qty * pos.avgBuyUsd
+                    journalClose(pos, asset, trade, reason, sig)
+                    val pnl = trade.usdValue - trade.feeUsd - pos.cost()
                     maybeRealSell(settings, asset, pos.qty, notes)
                     completed("SELL", asset, true, "فروش " + pos.symbol + " — " + reason, pnl)
                 } else {
@@ -479,6 +637,10 @@ class TradeEngine(
                 val acc0 = broker.account()
                 val equity = sleeveEquity(acc0, m, priceMap)
                 val reserve = equity * plan.cashReservePct
+                // محافظ نرخ برد: اگر معاملات اخیر این بازار کم‌برد و زیان‌ده بوده، سخت‌گیرتر و با حجم کمتر خرید می‌شود
+                val guard = com.saeidkazemi.trader.analysis.Performance.guard(journal.all(), m, settings)
+                val th = settings.buyThreshold + plan.buyThresholdDelta
+                if (guard.active) notes.add("محافظ نرخ برد (" + m.faTitle + "): " + guard.text + ".")
                 for (sig in signals) {
                     if (sig.market != m || sig.action != Action.BUY) continue
                     val acc = broker.account()
@@ -490,9 +652,11 @@ class TradeEngine(
                     if (asset.isSimulated) continue
                     // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
                     if (irBlock(asset, buy = true) != null) continue
+                    if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) continue
                     val usdPrice = priceMap[asset.id] ?: continue
                     if (!usdPrice.isFinite() || usdPrice <= 0) continue
-                    val budget = equity * plan.positionPct
+                    val budget = equity * plan.positionPct *
+                        (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0)
                     val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve
                     val amount = minOf(budget, available)
                     if (amount < plan.minTradeUsd) break
@@ -513,6 +677,12 @@ class TradeEngine(
                     )
                     if (trade != null) {
                         buys.add(asset.symbol)
+                        journalOpen(
+                            asset, trade, sig, settings,
+                            stopUsd = usdPrice * (1 - stopPct), tpUsd = usdPrice * (1 + plan.tpPct), trailPct = plan.trailPct,
+                            auto = true, threshold = th, digest = digests[asset.id], hist = histories[asset.id].orEmpty(),
+                            guardNote = if (guard.active) guard.text else null
+                        )
                         maybeRealBuy(settings, asset, amount, usdIrr, notes)
                         completed("BUY", asset, true, "خرید " + asset.symbol + " به مبلغ " + Format.num(amount) + " دلار")
                     } else {
@@ -580,6 +750,13 @@ class TradeEngine(
             return "خرید انجام نشد."
         }
         tracker.record(broker.account().positions, market.cachedAssets().associate { it.id to market.usdPriceOf(it, settings) })
+        ensureJournal()
+        journalOpen(
+            asset, trade, lastSignals.firstOrNull { it.assetId == assetId }, settings,
+            stopUsd = usdPrice * (1 - stopPct), tpUsd = usdPrice * (1 + plan.tpPct), trailPct = plan.trailPct,
+            auto = false, threshold = settings.buyThreshold + plan.buyThresholdDelta,
+            digest = news.cached(assetId), hist = market.cachedHistory(assetId).orEmpty(), guardNote = null
+        )
         completed("BUY", asset, true, "خرید دستی " + asset.symbol + " به مبلغ " + Format.num(usdAmount) + " دلار")
         if (settings.realTrading) {
             val notes = mutableListOf<String>()
@@ -603,8 +780,10 @@ class TradeEngine(
             completed("SELL", pos.symbol, pos.market, false, "فروش " + pos.symbol + " انجام نشد")
             return "فروش انجام نشد."
         }
+        ensureJournal()
+        journalClose(pos, asset, trade, "فروش دستی", lastSignals.firstOrNull { it.assetId == assetId })
         completed("SELL", pos.symbol, pos.market, true, "فروش دستی " + pos.symbol,
-            trade.usdValue - trade.feeUsd - pos.qty * pos.avgBuyUsd)
+            trade.usdValue - trade.feeUsd - pos.cost())
         if (settings.realTrading && asset != null) {
             val notes = mutableListOf<String>()
             maybeRealSell(settings, asset, pos.qty, notes)
@@ -615,6 +794,7 @@ class TradeEngine(
 
     fun resetPaperAccount(capitalUsd: Double) {
         broker.reset(capitalUsd, store.loadSettings().allocations)
+        journal.clear()
     }
 
     // ---- بخش معامله واقعی (آزمایشی، فقط نوبیتکس) ----

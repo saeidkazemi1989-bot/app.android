@@ -52,6 +52,12 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
     var lockKeep by remember(state.settings.profitLockKeepPct) {
         mutableStateOf(Format.raw(state.settings.profitLockKeepPct, 1))
     }
+    var guardMin by remember(state.settings.minWinRatePct) {
+        mutableStateOf(Format.raw(state.settings.minWinRatePct, 0))
+    }
+    var guardWindow by remember(state.settings.guardWindow) {
+        mutableStateOf(state.settings.guardWindow.toString())
+    }
     var allocInputs by remember(state.settings.allocations) {
         mutableStateOf(
             listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
@@ -171,6 +177,66 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                         .padding(top = 8.dp)
                 ) {
                     Text("ذخیره تقسیم سرمایه و شروع مجدد حساب دمو")
+                }
+            }
+        }
+
+        // محافظ نرخ برد
+        item {
+            SettingsCard("محافظ نرخ برد (win rate)") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "معامله‌گر همیشه ادامه می‌دهد، ولی اگر در آخرین معاملات بسته‌شده یک بازار، نرخ برد کمتر از حد زیر " +
+                            "و جمع سود/زیانشان منفی باشد، آن بازار «محتاط» می‌شود: فقط سیگنال‌های قوی‌تر (آستانه +" +
+                            com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD + ") و با نصف حجم خرید می‌شوند. " +
+                            "نرخ برد پایین با سودهای بزرگ (جمع مثبت) مشکلی ندارد و محافظ را فعال نمی‌کند.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = state.settings.winRateGuard, onCheckedChange = { vm.toggleWinRateGuard(it) })
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = guardMin,
+                        onValueChange = { guardMin = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("حداقل نرخ برد ٪") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = guardWindow,
+                        onValueChange = { guardWindow = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("تعداد معاملات اخیر") },
+                        singleLine = true
+                    )
+                }
+                Button(
+                    onClick = { vm.setWinRateGuard(guardMin.toDoubleOrNull() ?: -1.0, guardWindow.trim().toIntOrNull() ?: -1) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Text("ذخیره محافظ نرخ برد")
+                }
+                state.perf.guards.forEach { g ->
+                    Text(
+                        g.market.faTitle + ": " + g.text,
+                        fontSize = 11.sp,
+                        color = if (g.active) Color(0xFFF7B731) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
         }

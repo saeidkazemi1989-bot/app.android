@@ -107,6 +107,14 @@ fun runSelfTest(outDir: File): Int {
             out("sound $n ok=$ok")
         }
         out("newsFeed=${st.newsFeed.size} digests=${st.newsDigests.size}")
+        run {
+            val j = container.tradeEngine.journal.all()
+            val first = j.firstOrNull()
+            out("journal n=${j.size} open=${j.count { it.isOpen }} first=${first?.symbol} score=${first?.score} reasons=${first?.reasons?.size} pro=${first?.proFactors?.size} news=${first?.newsHeadlines?.size} fc=${first?.forecastExpPct?.let { "%.2f".format(it) }} sections=" +
+                (first?.let { com.saeidkazemi.trader.journal.JournalExport.sections(it).joinToString("|") { s -> s.title } } ?: "-"))
+            val perf = com.saeidkazemi.trader.analysis.Performance.report(j, container.store.loadSettings())
+            out("perf closed=${perf.all.closed} winRate=${perf.all.winRate} guards=" + perf.guards.joinToString("; ") { it.market.name + ":" + it.active })
+        }
         container.tradeEngine.outlooks().values.take(4).forEach { o ->
             val f = o.forecast
             out(
@@ -212,6 +220,10 @@ fun runSelfTest(outDir: File): Int {
                 val s by controller.state.collectAsState()
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
             }
+        }
+        shot("11-journal", 760, 2400) {
+            val s by controller.state.collectAsState()
+            com.saeidkazemi.trader.ui.screens.JournalScreen(s, onToast = {}, onOpenAsset = {})
         }
         // نمودار مصنوعی: قیمت اول زیر قیمت خرید رفته و بعد به سود رسیده (بررسی رنگ‌های سود/زیان و پیش‌بینی)
         run {

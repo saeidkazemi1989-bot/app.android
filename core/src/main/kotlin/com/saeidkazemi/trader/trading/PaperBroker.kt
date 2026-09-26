@@ -100,7 +100,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
             stopLossUsd = stopLossUsd,
             takeProfitUsd = takeProfitUsd,
             peakUsd = usdPrice,
-            trailPct = trailPct
+            trailPct = trailPct,
+            costUsd = usdAmount
         )
         val trade = Trade(
             id = shortId(),
@@ -134,7 +135,7 @@ class PaperBroker(private val store: JsonStore) : Broker {
             val gross = pos.qty * usdPrice
             val fee = gross * feePct
             val net = gross - fee
-            val pnl = net - pos.qty * pos.avgBuyUsd
+            val pnl = net - pos.cost()
             val trade = Trade(
                 id = shortId(),
                 ts = System.currentTimeMillis(),

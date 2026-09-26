@@ -107,6 +107,7 @@ class TraderController(
         val priceMap = HashMap<String, Double>()
         for (a in assets) priceMap[a.id] = market.usdPriceOf(a, settings)
         val digests = container.tradeEngine.cachedNews().associateBy { it.assetId }
+        val journal = container.tradeEngine.journal.all()
         _state.update {
             it.copy(
                 loading = false,
@@ -123,7 +124,9 @@ class TraderController(
                 lastCycle = report,
                 newsDigests = digests,
                 newsFeed = buildFeed(digests),
-                outlooks = container.tradeEngine.outlooks()
+                outlooks = container.tradeEngine.outlooks(),
+                journal = journal,
+                perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings)
             )
         }
     }
@@ -215,6 +218,29 @@ class TraderController(
         )
     }
 
+    fun toggleWinRateGuard(on: Boolean) {
+        updateSettings { it.copy(winRateGuard = on) }
+        toast(if (on) "محافظ نرخ برد فعال شد." else "محافظ نرخ برد خاموش شد؛ معاملات بدون توجه به نتایج اخیر ادامه می‌یابند.")
+    }
+
+    /** حداقل نرخ برد (درصد) و تعداد معاملات اخیر برای محافظ نرخ برد. */
+    fun setWinRateGuard(minWinRatePct: Double, window: Int) {
+        if (!minWinRatePct.isFinite() || minWinRatePct < 5 || minWinRatePct > 95 || window < 3 || window > 100) {
+            toast("نرخ برد بین ۵ تا ۹۵ و تعداد معاملات بین ۳ تا ۱۰۰ وارد کنید.")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val settings = container.store.loadSettings().copy(minWinRatePct = minWinRatePct, guardWindow = window)
+            container.store.saveSettings(settings)
+            val journal = container.tradeEngine.journal.all()
+            _state.update { it.copy(settings = settings, perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings)) }
+            toast(
+                "ذخیره شد: اگر نرخ برد " + window + " معامله آخر یک بازار زیر " +
+                    com.saeidkazemi.trader.util.Format.num(minWinRatePct, 0) + "٪ و جمعشان زیان‌ده باشد، آن بازار محتاط می‌شود."
+            )
+        }
+    }
+
     fun toggleSound(on: Boolean) = updateSettings { it.copy(soundAlerts = on) }
 
     fun toggleVibrate(on: Boolean) = updateSettings { it.copy(vibrateAlerts = on) }
@@ -259,7 +285,8 @@ class TraderController(
             val settings = container.store.loadSettings().copy(allocations = alloc)
             container.store.saveSettings(settings)
             container.broker.reset(settings.capitalUsd, alloc)
-            _state.update { it.copy(settings = settings, account = container.broker.account()) }
+            container.tradeEngine.journal.clear()
+            _state.update { it.copy(settings = settings, account = container.broker.account(), journal = emptyList(), perf = com.saeidkazemi.trader.analysis.PerfReport()) }
             toast("سرمایه بین بازارها تقسیم شد و حساب دمو از نو ساخته شد.")
         }
     }
@@ -279,7 +306,8 @@ class TraderController(
             val settings = container.store.loadSettings().copy(capitalUsd = amountUsd)
             container.store.saveSettings(settings)
             container.broker.reset(amountUsd, settings.allocations)
-            _state.update { it.copy(settings = settings, account = container.broker.account()) }
+            container.tradeEngine.journal.clear()
+            _state.update { it.copy(settings = settings, account = container.broker.account(), journal = emptyList(), perf = com.saeidkazemi.trader.analysis.PerfReport()) }
             toast("حساب دمو با سرمایه جدید از نو ساخته شد.")
         }
     }
@@ -312,7 +340,7 @@ class TraderController(
         scope.launch(Dispatchers.IO) {
             val settings = change(container.store.loadSettings())
             container.store.saveSettings(settings)
-            _state.update { it.copy(settings = settings) }
+            _state.update { it.copy(settings = settings, perf = com.saeidkazemi.trader.analysis.Performance.report(it.journal, settings)) }
         }
     }
 
@@ -341,8 +369,11 @@ class TraderController(
 
     private fun syncAccount() {
         val held = container.broker.account().positions.map { it.assetId }.toSet()
+        val journal = container.tradeEngine.journal.all()
         _state.update { s ->
             s.copy(
+                journal = journal,
+                perf = com.saeidkazemi.trader.analysis.Performance.report(journal, s.settings),
                 account = container.broker.account(),
                 outlooks = container.tradeEngine.outlooks(),
                 detail = s.detail?.let { d -> d.copy(held = d.asset.id in held) }

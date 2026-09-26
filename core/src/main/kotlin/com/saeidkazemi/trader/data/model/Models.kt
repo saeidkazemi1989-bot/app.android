@@ -100,8 +100,13 @@ data class Position(
     /** فاصله حد ضرر متحرک از قله (کسری، مثل ۰٫۰۸)؛ ۰ یعنی غیرفعال. */
     val trailPct: Double = 0.0,
     /** درصد سود خالصی که قفل شده (حد ضرر حداقل روی آن است)؛ ۰ یعنی هنوز قفل نشده. */
-    val profitLockedPct: Double = 0.0
-)
+    val profitLockedPct: Double = 0.0,
+    /** بهای تمام‌شده واقعی (مبلغ پرداختی شامل کارمزد خرید)؛ ۰ برای موقعیت‌های قدیمی. */
+    val costUsd: Double = 0.0
+) {
+    /** بهای تمام‌شده برای محاسبه سود/زیان واقعی (با کارمزد خرید). */
+    fun cost(): Double = if (costUsd > 0) costUsd else qty * avgBuyUsd
+}
 
 /** یک معامله انجام‌شده (دمو یا واقعی). */
 data class Trade(
@@ -164,7 +169,14 @@ data class AppSettings(
     /** آستانه فعال شدن قفل سود (درصد سود خالص پس از کارمزد). */
     val profitLockTriggerPct: Double = 10.0,
     /** سودی که پس از فعال شدن قفل حفظ می‌شود (درصد خالص؛ حداکثر برابر آستانه). */
-    val profitLockKeepPct: Double = 10.0
+    val profitLockKeepPct: Double = 10.0,
+    /**
+     * محافظ نرخ برد: اگر در آخرین [guardWindow] معامله بسته‌شده یک بازار، نرخ برد کمتر از [minWinRatePct] و
+     * جمع سود/زیان منفی باشد، آن بازار «محتاط» می‌شود (آستانه خرید بالاتر و حجم هر خرید نصف) تا عملکرد بهتر شود.
+     */
+    val winRateGuard: Boolean = true,
+    val minWinRatePct: Double = 40.0,
+    val guardWindow: Int = 10
 ) {
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
     fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel

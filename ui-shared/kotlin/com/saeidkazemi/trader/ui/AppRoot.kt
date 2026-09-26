@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Notifications
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import com.saeidkazemi.trader.core.TraderController
 import com.saeidkazemi.trader.ui.screens.AssetDetailScreen
 import com.saeidkazemi.trader.ui.screens.DashboardScreen
+import com.saeidkazemi.trader.ui.screens.JournalScreen
 import com.saeidkazemi.trader.ui.screens.MarketsScreen
 import com.saeidkazemi.trader.ui.screens.NewsScreen
 import com.saeidkazemi.trader.ui.screens.PortfolioScreen
@@ -58,6 +60,7 @@ private val navItems = listOf(
     NavItem("signals", "سیگنال‌ها", Icons.Filled.Star),
     NavItem("news", "اخبار", Icons.Filled.Notifications),
     NavItem("portfolio", "پرتفوی", Icons.Filled.ShoppingCart),
+    NavItem("journal", "ژورنال", Icons.Filled.DateRange),
     NavItem("settings", "تنظیمات", Icons.Filled.Settings)
 )
 
@@ -114,6 +117,7 @@ fun AppRoot(
                     "signals" -> SignalsScreen(state = state, onBuy = controller::manualBuy, onOpenAsset = openAsset)
                     "news" -> NewsScreen(state = state, onRefreshNews = controller::refreshNews, onOpenAsset = openAsset)
                     "portfolio" -> PortfolioScreen(state = state, onSell = controller::manualSell, onOpenAsset = openAsset)
+                    "journal" -> JournalScreen(state = state, onToast = controller::toast, onOpenAsset = openAsset)
                     "settings" -> SettingsScreen(state = state, vm = controller)
                     else -> DashboardScreen(
                         state = state,

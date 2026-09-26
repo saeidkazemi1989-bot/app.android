@@ -83,7 +83,11 @@ data class UiState(
     val newsRefreshing: Boolean = false,
     val platform: PlatformInfo = PlatformInfo(),
     /** روند و پیش‌بینی هر موقعیت باز (کلید: شناسه دارایی). */
-    val outlooks: Map<String, com.saeidkazemi.trader.analysis.PositionOutlook> = emptyMap()
+    val outlooks: Map<String, com.saeidkazemi.trader.analysis.PositionOutlook> = emptyMap(),
+    /** ژورنال معاملات (جدیدترین اول). */
+    val journal: List<com.saeidkazemi.trader.data.model.JournalEntry> = emptyList(),
+    /** پنل سودآوری: نرخ برد، ضریب سود، امید ریاضی، … */
+    val perf: com.saeidkazemi.trader.analysis.PerfReport = com.saeidkazemi.trader.analysis.PerfReport()
 ) {
     val equityUsd: Double
         get() = account.cashUsd + account.positions.sumOf { p ->

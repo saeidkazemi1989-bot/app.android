@@ -54,6 +54,21 @@ class JsonStore(private val dir: File) {
         write("tracks.json", TrackFile(tracks))
     }
 
+    /** ژورنال معاملات (دلایل ورود/خروج و نتیجه). */
+    data class JournalFile(val entries: List<com.saeidkazemi.trader.data.model.JournalEntry>? = null)
+
+    @Suppress("SENSELESS_COMPARISON")
+    fun loadJournal(): List<com.saeidkazemi.trader.data.model.JournalEntry> {
+        val raw: List<com.saeidkazemi.trader.data.model.JournalEntry?> =
+            read("journal.json", JournalFile::class.java)?.entries.orEmpty()
+        // ردیف خراب (بدون شناسه یا بازار) کنار گذاشته می‌شود
+        return raw.filterNotNull().filter { it.id != null && it.market != null && it.assetId != null }
+    }
+
+    fun saveJournal(entries: List<com.saeidkazemi.trader.data.model.JournalEntry>) {
+        write("journal.json", JournalFile(entries))
+    }
+
     private fun <T> read(name: String, type: Class<T>): T? {
         return try {
             synchronized(lock) {
