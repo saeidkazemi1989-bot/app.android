@@ -18,7 +18,9 @@ data class AssetDetail(
     val usdPrice: Double,
     val held: Boolean,
     val news: NewsDigest? = null,
-    val newsLoading: Boolean = false
+    val newsLoading: Boolean = false,
+    /** پیش‌بینی ۷ روز آینده (به دلار). */
+    val forecast: com.saeidkazemi.trader.analysis.Forecast.Result? = null
 )
 
 /** یک ردیف در صفحه اخبار. */
@@ -79,7 +81,9 @@ data class UiState(
     val newsFeed: List<NewsFeedEntry> = emptyList(),
     val newsDigests: Map<String, NewsDigest> = emptyMap(),
     val newsRefreshing: Boolean = false,
-    val platform: PlatformInfo = PlatformInfo()
+    val platform: PlatformInfo = PlatformInfo(),
+    /** روند و پیش‌بینی هر موقعیت باز (کلید: شناسه دارایی). */
+    val outlooks: Map<String, com.saeidkazemi.trader.analysis.PositionOutlook> = emptyMap()
 ) {
     val equityUsd: Double
         get() = account.cashUsd + account.positions.sumOf { p ->

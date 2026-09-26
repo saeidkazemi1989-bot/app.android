@@ -40,7 +40,13 @@ import com.saeidkazemi.trader.ui.components.MarketChip
 import com.saeidkazemi.trader.ui.components.NewsDigestSummary
 import com.saeidkazemi.trader.ui.components.NewsItemRow
 import com.saeidkazemi.trader.ui.components.sentimentColor
-import com.saeidkazemi.trader.ui.components.PriceChart
+import com.saeidkazemi.trader.analysis.Forecast
+import com.saeidkazemi.trader.data.model.PricePoint
+import com.saeidkazemi.trader.ui.components.ForecastSummary
+import com.saeidkazemi.trader.ui.components.OutlookSummary
+import com.saeidkazemi.trader.ui.components.TrendChart
+import com.saeidkazemi.trader.ui.components.TrendLegend
+import androidx.compose.foundation.clickable
 import com.saeidkazemi.trader.ui.components.SimBadge
 import com.saeidkazemi.trader.ui.components.pnlColor
 import com.saeidkazemi.trader.ui.suggestedBuyUsd
@@ -133,7 +139,43 @@ fun AssetDetailScreen(
             }
         }
 
-        // نمودار
+        // نمودار روند: کجا خریدید، الان در سود یا زیان هستید، و پیش‌بینی چند روز آینده
+        val pos = state.account.positions.firstOrNull { it.assetId == assetId }
+        val outlook = if (pos != null) state.outlooks[assetId] else null
+        val factor = if (detail.usdPrice > 0 && asset.price > 0) asset.price / detail.usdPrice else 1.0
+        val fmtNative: (Double) -> String = if (asset.baseCurrency == "IRR") {
+            { v -> Format.compactIrr(v) }
+        } else {
+            { v -> "$" + Format.price(v) }
+        }
+        var range by remember(assetId, pos != null) { mutableStateOf(if (pos != null) "BUY" else "90") }
+        val nowTs = System.currentTimeMillis()
+        val hist = detail.history.filter { it.price > 0 }.sortedBy { it.t }
+        val past: List<PricePoint> = run {
+            if (pos != null) {
+                val trend = (outlook?.trend ?: listOf(
+                    PricePoint(pos.openedAt, pos.avgBuyUsd),
+                    PricePoint(maxOf(nowTs, pos.openedAt + 1), detail.usdPrice)
+                )).map { PricePoint(it.t, it.price * factor) }
+                val before = hist.filter { it.t < pos.openedAt }
+                when (range) {
+                    "BUY" -> {
+                        val ctx = (nowTs - pos.openedAt) / 2
+                        val ctxPts = if (ctx >= 2 * 86_400_000L) before.filter { it.t >= pos.openedAt - ctx } else emptyList()
+                        ctxPts + trend
+                    }
+                    else -> {
+                        val from = nowTs - (range.toLongOrNull() ?: 90L) * 86_400_000L
+                        (before + trend).filter { it.t >= from }
+                    }
+                }
+            } else {
+                val from = nowTs - (range.toLongOrNull() ?: 90L) * 86_400_000L
+                val base = hist.filter { it.t >= from }
+                if (base.isNotEmpty() && nowTs > base.last().t) base + PricePoint(nowTs, asset.price) else base
+            }
+        }
+        val fcDisplay = (outlook?.forecast ?: detail.forecast)?.scaled(factor)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -142,17 +184,71 @@ fun AssetDetailScreen(
                 .padding(12.dp)
         ) {
             Text(
-                if (asset.market == com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK && asset.isSimulated)
-                    "نمودار قیمت (شبیه‌سازی ۱۲۰ روزه)"
-                else "نمودار قیمت ۹۰ روزه",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                if (pos != null) "روند: نقطه خرید شما، سود/زیان و پیش‌بینی " + Forecast.HORIZON_DAYS + " روز"
+                else "روند قیمت و پیش‌بینی " + Forecast.HORIZON_DAYS + " روز",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
             )
-            PriceChart(points = detail.history, modifier = Modifier.padding(top = 8.dp))
+            if (asset.isSimulated) {
+                Text(
+                    "داده این دارایی شبیه‌سازی‌شده است؛ نمودار و پیش‌بینی فقط نمایشی‌اند.",
+                    fontSize = 10.sp,
+                    color = Color(0xFFF7B731),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            Row(
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val opts = buildList {
+                    if (pos != null) add("BUY" to "از خرید")
+                    add("30" to "۱ ماه")
+                    add("90" to "۳ ماه")
+                }
+                opts.forEach { (key, title) ->
+                    val selected = range == key
+                    Text(
+                        title,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { range = key }
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+            TrendChart(
+                past = past,
+                forecast = fcDisplay,
+                fmt = fmtNative,
+                buyPrice = pos?.let { it.avgBuyUsd * factor },
+                buyTime = pos?.openedAt,
+                stopPrice = pos?.let { it.stopLossUsd * factor },
+                stopLabel = if (pos != null && pos.profitLockedPct > 0) "🔒 قفل سود" else "حد ضرر",
+                takeProfit = pos?.let { it.takeProfitUsd * factor },
+                height = 240.dp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            TrendLegend(showPosition = pos != null, showForecast = fcDisplay != null)
+            Spacer(Modifier.height(8.dp))
+            when {
+                outlook != null -> OutlookSummary(outlook)
+                fcDisplay != null -> ForecastSummary(fcDisplay)
+                else -> Text(
+                    "برای پیش‌بینی، تاریخچه قیمت کافی (حداقل ۲۰ روز) در دسترس نیست.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
         // موقعیت باز
-        val pos = state.account.positions.firstOrNull { it.assetId == assetId }
         if (pos != null) {
             val cur = state.priceMap[assetId] ?: pos.avgBuyUsd
             val value = cur * pos.qty

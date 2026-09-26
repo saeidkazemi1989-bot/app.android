@@ -218,6 +218,45 @@ class TradeEngine(
     var lastSignals: List<Signal> = emptyList()
         private set
 
+    /** مسیر قیمت موقعیت‌های باز از لحظه خرید. */
+    val tracker = PositionTracker(store)
+
+    /**
+     * چشم‌انداز همه موقعیت‌های باز: مسیر از خرید، سود/زیان فعلی و پیش‌بینی ۷ روز آینده.
+     * فقط از داده‌های کش‌شده استفاده می‌کند (بدون درخواست شبکه).
+     */
+    fun outlooks(): Map<String, com.saeidkazemi.trader.analysis.PositionOutlook> {
+        val settings = store.loadSettings()
+        val assets = market.cachedAssets().associateBy { it.id }
+        val scores = lastSignals.associate { it.assetId to it.score }
+        val out = HashMap<String, com.saeidkazemi.trader.analysis.PositionOutlook>()
+        for (pos in broker.account().positions) {
+            try {
+                val asset = assets[pos.assetId]
+                val cur = asset?.let { market.usdPriceOf(it, settings) } ?: pos.avgBuyUsd
+                // تاریخچه به ارز خود دارایی است؛ با نسبت قیمت دلاری به قیمت اصلی به دلار تبدیل می‌شود.
+                val factor = if (asset != null && asset.price > 0) cur / asset.price else 1.0
+                val histUsd = market.cachedHistory(pos.assetId).orEmpty().map { PricePoint(it.t, it.price * factor) }
+                out[pos.assetId] = com.saeidkazemi.trader.analysis.PositionOutlook.build(
+                    assetId = pos.assetId,
+                    avgBuyUsd = pos.avgBuyUsd,
+                    openedAt = pos.openedAt,
+                    currentUsd = cur,
+                    stopUsd = pos.stopLossUsd,
+                    takeProfitUsd = pos.takeProfitUsd,
+                    buyFee = feeFor(asset, pos.market, true, settings),
+                    sellFee = feeFor(asset, pos.market, false, settings),
+                    historyUsd = histUsd,
+                    track = tracker.track(pos.assetId),
+                    score = scores[pos.assetId],
+                    simulated = asset?.isSimulated ?: false
+                )
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
         val settings = store.loadSettings()
         val buys = mutableListOf<String>()
@@ -485,6 +524,7 @@ class TradeEngine(
         }
 
         store.saveAccount(broker.account())
+        tracker.record(broker.account().positions, priceMap)
         val report = CycleReport(
             ts = System.currentTimeMillis(),
             trigger = trigger,
@@ -539,6 +579,7 @@ class TradeEngine(
             completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
             return "خرید انجام نشد."
         }
+        tracker.record(broker.account().positions, market.cachedAssets().associate { it.id to market.usdPriceOf(it, settings) })
         completed("BUY", asset, true, "خرید دستی " + asset.symbol + " به مبلغ " + Format.num(usdAmount) + " دلار")
         if (settings.realTrading) {
             val notes = mutableListOf<String>()

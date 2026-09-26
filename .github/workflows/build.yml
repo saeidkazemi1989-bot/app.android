@@ -107,11 +107,17 @@ jobs:
           if (-not $p.WaitForExit(420000)) { $p.Kill(); Write-Host "::warning::self-test timed out" }
           Write-Host "exit code: $($p.ExitCode)"
           Write-Host "===== SELFTEST BEGIN ====="
-          if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
+          if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 | Where-Object { $_ -notmatch '^IMG64 ' } } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(pro |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=|iranScan)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(outlook |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=|IMG64 .* size)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
+      - name: Trend screenshots (base64 for review)
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (Test-Path "selftest/selftest.txt") { Get-Content "selftest/selftest.txt" -Encoding UTF8 | Where-Object { $_ -match '^IMG64 \S+ \d+ ' } }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

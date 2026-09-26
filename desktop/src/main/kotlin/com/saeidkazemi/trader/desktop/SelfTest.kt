@@ -105,6 +105,14 @@ fun runSelfTest(outDir: File): Int {
             out("sound $n ok=$ok")
         }
         out("newsFeed=${st.newsFeed.size} digests=${st.newsDigests.size}")
+        container.tradeEngine.outlooks().values.take(4).forEach { o ->
+            val f = o.forecast
+            out(
+                "outlook ${o.assetId} pnl=${"%.2f".format(o.pnlPct)} net=${"%.2f".format(o.netPnlPct)} trend=${o.trend.size} " +
+                    (if (f == null) "fc=none" else "fc=${f.trendLabel} exp=${"%.2f".format(o.expectedPnlPct)} [${"%.1f".format(o.lowPnlPct)}..${"%.1f".format(o.highPnlPct)}] " +
+                        "pProfit=${"%.2f".format(o.probProfit)} pStop=${o.probStop?.let { "%.2f".format(it) }} pTp=${o.probTakeProfit?.let { "%.2f".format(it) }} conf=${f.confidence}")
+            )
+        }
 
         val probe = listOfNotNull(
             st.assets.firstOrNull { it.market == MarketKind.IR_STOCK && it.symbol == "شپنا" }
@@ -122,7 +130,7 @@ fun runSelfTest(outDir: File): Int {
         if (st.assets.isEmpty() || st.signals.isEmpty()) exit = 2
 
         // ---- تصاویر صفحه‌ها ----
-        fun shot(name: String, w: Int, h: Int, content: @Composable () -> Unit) {
+        fun shot(name: String, w: Int, h: Int, jpegLog: Boolean = false, content: @Composable () -> Unit) {
             try {
                 val scene = ImageComposeScene(w, h, Density(1f)) {
                     TraderTheme {
@@ -135,6 +143,14 @@ fun runSelfTest(outDir: File): Int {
                 val img = scene.render(2_000_000_000L)
                 val bytes = img.encodeToData(EncodedImageFormat.PNG)?.bytes
                 if (bytes != null) File(outDir, "$name.png").writeBytes(bytes)
+                if (jpegLog) {
+                    // نسخه فشرده برای بازبینی از روی لاگ CI
+                    img.encodeToData(EncodedImageFormat.JPEG, 60)?.bytes?.let { jb ->
+                        val b64 = java.util.Base64.getEncoder().encodeToString(jb)
+                        b64.chunked(3000).forEachIndexed { i, c -> log.appendLine("IMG64 $name $i $c") }
+                        out("IMG64 $name size=${jb.size}")
+                    }
+                }
                 scene.close()
                 out("screenshot $name ok")
             } catch (e: Throwable) {
@@ -185,6 +201,23 @@ fun runSelfTest(outDir: File): Int {
         shot("7-portfolio", 1100, 1600) {
             val s by controller.state.collectAsState()
             com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
+        }
+        // روند موقعیت: نقطه خرید، سود/زیان و پیش‌بینی
+        controller.state.value.account.positions.firstOrNull()?.let { p ->
+            controller.openAsset(p.assetId)
+            runBlocking {
+                withTimeoutOrNull(60_000) {
+                    while (controller.state.value.detail?.asset?.id != p.assetId || controller.state.value.detail?.newsLoading != false) delay(300)
+                }
+            }
+            shot("8-position-trend", 760, 1000, jpegLog = true) {
+                val s by controller.state.collectAsState()
+                AssetDetailScreen(p.assetId, s, onBuy = { _, _ -> }, onSell = {}, onBack = {})
+            }
+            shot("9-portfolio-trend", 760, 1300, jpegLog = true) {
+                val s by controller.state.collectAsState()
+                com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
+            }
         }
     } catch (e: Throwable) {
         out("SELFTEST CRASH: $e")

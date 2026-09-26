@@ -25,7 +25,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.saeidkazemi.trader.analysis.PositionOutlook
 import com.saeidkazemi.trader.data.model.Position
+import com.saeidkazemi.trader.data.model.PricePoint
+import com.saeidkazemi.trader.ui.components.OutlookSummary
+import com.saeidkazemi.trader.ui.components.TrendChart
 import com.saeidkazemi.trader.data.model.Trade
 import com.saeidkazemi.trader.ui.UiState
 import com.saeidkazemi.trader.ui.components.InfoCard
@@ -109,6 +113,7 @@ fun PortfolioScreen(
                 PositionRow(
                     pos = pos,
                     curUsd = state.priceMap[pos.assetId] ?: pos.avgBuyUsd,
+                    outlook = state.outlooks[pos.assetId],
                     onSell = onSell,
                     onOpen = { onOpenAsset(pos.assetId) }
                 )
@@ -137,18 +142,22 @@ fun PortfolioScreen(
 private fun PositionRow(
     pos: Position,
     curUsd: Double,
+    outlook: PositionOutlook?,
     onSell: (String) -> Unit,
     onOpen: () -> Unit
 ) {
     val value = curUsd * pos.qty
     val pnl = value - pos.qty * pos.avgBuyUsd
     val pnlPct = if (pos.avgBuyUsd > 0) (curUsd / pos.avgBuyUsd - 1) * 100 else 0.0
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
             .clickable(onClick = onOpen)
-            .padding(12.dp),
+            .padding(12.dp)
+    ) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -186,6 +195,34 @@ private fun PositionRow(
         Button(onClick = { onSell(pos.assetId) }) {
             Text("فروش", fontSize = 12.sp)
         }
+    }
+    // روند از لحظه خرید + پیش‌بینی
+    val trend = outlook?.trend ?: listOf(
+        PricePoint(pos.openedAt, pos.avgBuyUsd),
+        PricePoint(maxOf(System.currentTimeMillis(), pos.openedAt + 1), curUsd)
+    )
+    Text(
+        "روند از زمان خرید (" + Format.dateTime(pos.openedAt) + ") و پیش‌بینی:",
+        fontSize = 10.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+    TrendChart(
+        past = trend,
+        forecast = outlook?.forecast,
+        fmt = { "$" + Format.price(it) },
+        buyPrice = pos.avgBuyUsd,
+        buyTime = pos.openedAt,
+        stopPrice = pos.stopLossUsd,
+        takeProfit = pos.takeProfitUsd,
+        height = 110.dp,
+        compact = true,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+    if (outlook != null) {
+        Spacer(Modifier.height(4.dp))
+        OutlookSummary(outlook, compact = true)
+    }
     }
 }
 

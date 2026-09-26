@@ -122,7 +122,8 @@ class TraderController(
                 rateIsFallback = market.rateIsFallback(),
                 lastCycle = report,
                 newsDigests = digests,
-                newsFeed = buildFeed(digests)
+                newsFeed = buildFeed(digests),
+                outlooks = container.tradeEngine.outlooks()
             )
         }
     }
@@ -343,6 +344,7 @@ class TraderController(
         _state.update { s ->
             s.copy(
                 account = container.broker.account(),
+                outlooks = container.tradeEngine.outlooks(),
                 detail = s.detail?.let { d -> d.copy(held = d.asset.id in held) }
             )
         }
@@ -366,13 +368,26 @@ class TraderController(
             }
             val held = container.broker.account().positions.any { it.assetId == assetId }
             val usdPrice = container.marketDataService.usdPriceOf(asset, settings)
+            val factor = if (asset.price > 0) usdPrice / asset.price else 1.0
+            val forecast = try {
+                com.saeidkazemi.trader.analysis.Forecast.build(
+                    history.map { com.saeidkazemi.trader.data.model.PricePoint(it.t, it.price * factor) },
+                    usdPrice,
+                    score = signal?.score,
+                    simulated = asset.isSimulated
+                )
+            } catch (e: Exception) {
+                null
+            }
             _state.update {
                 it.copy(
                     detail = AssetDetail(
                         asset, history, signal, usdPrice, held,
                         news = cachedNews,
-                        newsLoading = settings.newsEnabled
-                    )
+                        newsLoading = settings.newsEnabled,
+                        forecast = forecast
+                    ),
+                    outlooks = container.tradeEngine.outlooks()
                 )
             }
             if (!settings.newsEnabled) return@launch

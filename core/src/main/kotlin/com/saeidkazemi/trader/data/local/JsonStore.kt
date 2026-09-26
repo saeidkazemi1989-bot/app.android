@@ -38,6 +38,22 @@ class JsonStore(private val dir: File) {
         write("account.json", account)
     }
 
+    /** مسیر قیمت موقعیت‌های باز از لحظه خرید (برای نمودار روند). */
+    data class TrackFile(val tracks: Map<String, List<com.saeidkazemi.trader.data.model.PricePoint>>? = null)
+
+    fun loadTracks(): Map<String, List<com.saeidkazemi.trader.data.model.PricePoint>> =
+        read("tracks.json", TrackFile::class.java)?.tracks.orEmpty().entries
+            .mapNotNull { e ->
+                // Gson ممکن است برای داده خراب null بگذارد
+                val v: List<com.saeidkazemi.trader.data.model.PricePoint?>? = e.value
+                if (v == null) null else e.key to v.filterNotNull()
+            }
+            .toMap()
+
+    fun saveTracks(tracks: Map<String, List<com.saeidkazemi.trader.data.model.PricePoint>>) {
+        write("tracks.json", TrackFile(tracks))
+    }
+
     private fun <T> read(name: String, type: Class<T>): T? {
         return try {
             synchronized(lock) {
