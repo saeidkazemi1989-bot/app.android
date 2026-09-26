@@ -128,7 +128,7 @@ fun JournalScreen(
                     )
                 }
                 Text(
-                    "خودکار: " + perf.auto.closed + " معامله، نرخ برد " + JournalExport.pct(perf.auto.winRate) + ", $" + Format.money(perf.auto.totalPnlUsd) +
+                    "خودکار: " + perf.auto.closed + " معامله، نرخ برد " + JournalExport.pct(perf.auto.winRate) + "، $" + Format.money(perf.auto.totalPnlUsd) +
                         " • دستی: " + perf.manual.closed + " معامله، $" + Format.money(perf.manual.totalPnlUsd),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
