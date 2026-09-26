@@ -130,7 +130,7 @@ fun runSelfTest(outDir: File): Int {
         if (st.assets.isEmpty() || st.signals.isEmpty()) exit = 2
 
         // ---- تصاویر صفحه‌ها ----
-        fun shot(name: String, w: Int, h: Int, jpegLog: Boolean = false, content: @Composable () -> Unit) {
+        fun shot(name: String, w: Int, h: Int, content: @Composable () -> Unit) {
             try {
                 val scene = ImageComposeScene(w, h, Density(1f)) {
                     TraderTheme {
@@ -143,14 +143,6 @@ fun runSelfTest(outDir: File): Int {
                 val img = scene.render(2_000_000_000L)
                 val bytes = img.encodeToData(EncodedImageFormat.PNG)?.bytes
                 if (bytes != null) File(outDir, "$name.png").writeBytes(bytes)
-                if (jpegLog) {
-                    // نسخه فشرده برای بازبینی از روی لاگ CI
-                    img.encodeToData(EncodedImageFormat.JPEG, 60)?.bytes?.let { jb ->
-                        val b64 = java.util.Base64.getEncoder().encodeToString(jb)
-                        b64.chunked(3000).forEachIndexed { i, c -> log.appendLine("IMG64 $name $i $c") }
-                        out("IMG64 $name size=${jb.size}")
-                    }
-                }
                 scene.close()
                 out("screenshot $name ok")
             } catch (e: Throwable) {
@@ -210,11 +202,11 @@ fun runSelfTest(outDir: File): Int {
                     while (controller.state.value.detail?.asset?.id != p.assetId || controller.state.value.detail?.newsLoading != false) delay(300)
                 }
             }
-            shot("8-position-trend", 760, 1000, jpegLog = true) {
+            shot("8-position-trend", 760, 1000) {
                 val s by controller.state.collectAsState()
                 AssetDetailScreen(p.assetId, s, onBuy = { _, _ -> }, onSell = {}, onBack = {})
             }
-            shot("9-portfolio-trend", 760, 1300, jpegLog = true) {
+            shot("9-portfolio-trend", 760, 1300) {
                 val s by controller.state.collectAsState()
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
             }

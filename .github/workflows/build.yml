@@ -107,17 +107,27 @@ jobs:
           if (-not $p.WaitForExit(420000)) { $p.Kill(); Write-Host "::warning::self-test timed out" }
           Write-Host "exit code: $($p.ExitCode)"
           Write-Host "===== SELFTEST BEGIN ====="
-          if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 | Where-Object { $_ -notmatch '^IMG64 ' } } else { Write-Host "::warning::no selftest output" }
+          if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(outlook |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=|IMG64 .* size)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(outlook |sleeves|events|sound .*false|screenshot .*FAILED|SELFTEST CRASH|exit=|signals=)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
-      - name: Trend screenshots (base64 for review)
+      - name: Publish trend screenshots as git blobs (for review via API)
         if: always()
         continue-on-error: true
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if (Test-Path "selftest/selftest.txt") { Get-Content "selftest/selftest.txt" -Encoding UTF8 | Where-Object { $_ -match '^IMG64 \S+ \d+ ' } }
+          foreach ($n in @("8-position-trend", "9-portfolio-trend")) {
+            $f = "selftest/$n.png"
+            if (Test-Path $f) {
+              $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f))
+              $body = @{ content = $b64; encoding = "base64" } | ConvertTo-Json
+              $r = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/${{ github.repository }}/git/blobs" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" } -Body $body -ContentType "application/json"
+              Write-Host "::notice::blob $n $($r.sha)"
+            }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
