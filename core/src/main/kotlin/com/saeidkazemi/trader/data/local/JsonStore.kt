@@ -57,6 +57,14 @@ class JsonStore(private val dir: File) {
         write("account.json", account)
     }
 
+    /** تنظیمات اتصال اندروید و ویندوز (جدا از تنظیمات معامله، چون هرگز بین دستگاه‌ها کپی نمی‌شود). */
+    fun loadSync(): com.saeidkazemi.trader.sync.SyncConfig? =
+        read("sync.json", com.saeidkazemi.trader.sync.SyncConfig::class.java)
+
+    fun saveSync(cfg: com.saeidkazemi.trader.sync.SyncConfig) {
+        write("sync.json", cfg)
+    }
+
     /** مسیر قیمت موقعیت‌های باز از لحظه خرید (برای نمودار روند). */
     data class TrackFile(val tracks: Map<String, List<com.saeidkazemi.trader.data.model.PricePoint>>? = null)
 

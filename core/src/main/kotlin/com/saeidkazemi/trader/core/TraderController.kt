@@ -58,6 +58,15 @@ class TraderController(
             container.tradeEngine.reports.collect { report -> syncFromEngine(report) }
         }
         scope.launch(Dispatchers.IO) {
+            container.sync.status.collect { st -> _state.update { it.copy(sync = st) } }
+        }
+        scope.launch(Dispatchers.IO) {
+            container.sync.events.collect { ev ->
+                if (ev == "data") syncFromEngine(null)
+                else if (ev.startsWith("msg:")) toast(ev.removePrefix("msg:"))
+            }
+        }
+        scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings()
             val account = container.broker.account()
             _state.update {
@@ -99,6 +108,7 @@ class TraderController(
 
     /** یک دور کامل: به‌روزرسانی بازار، تحلیل، اخبار، مدیریت ریسک و (در حالت خودکار) خرید و فروش. */
     fun refresh() {
+        if (container.sync.isFollower) container.sync.syncNow()
         scope.launch(Dispatchers.IO) {
             _state.update { it.copy(refreshing = true) }
             runCycleInternal("manual")
@@ -121,7 +131,7 @@ class TraderController(
         }
     }
 
-    private fun syncFromEngine(report: CycleReport) {
+    private fun syncFromEngine(report: CycleReport?) {
         val settings = container.store.loadSettings()
         val market = container.marketDataService
         val assets = market.cachedAssets()
@@ -136,7 +146,7 @@ class TraderController(
                 loading = false,
                 refreshing = false,
                 error = null,
-                notes = report.notes,
+                notes = mirrorNotes(report?.notes ?: it.notes),
                 assets = assets,
                 signals = container.tradeEngine.lastSignals,
                 priceMap = priceMap,
@@ -144,7 +154,7 @@ class TraderController(
                 settings = settings,
                 usdIrr = market.usdIrr(settings),
                 rateIsFallback = market.rateIsFallback(),
-                lastCycle = report,
+                lastCycle = report ?: it.lastCycle,
                 newsDigests = digests,
                 newsFeed = buildFeed(digests),
                 outlooks = container.tradeEngine.outlooks(),
@@ -157,6 +167,91 @@ class TraderController(
                 backtestProgress = container.tradeEngine.backtestProgress
             )
         }
+    }
+
+    /** در حالت آینه، یادداشت‌های دستگاه اصلی (دلایل خرید/نخریدن) نشان داده می‌شود. */
+    private fun mirrorNotes(local: List<String>): List<String> {
+        val sync = container.sync
+        if (!sync.isFollower) return local
+        val m = sync.mirror ?: return listOf("حالت آینه: هنوز وضعیتی از دستگاه اصلی دریافت نشده است.") + local
+        val head = "حالت آینه: وضعیت «" + m.device.ifBlank { "دستگاه اصلی" } + "» (نسخه " + m.appVersion + ") نمایش داده می‌شود؛ معاملات روی همان دستگاه انجام می‌شود." +
+            (if (m.appVersion != AppVersion.NAME) " نسخه دو دستگاه یکسان نیست (" + AppVersion.NAME + " / " + m.appVersion + ")؛ هر دو را به‌روز کنید." else "")
+        return listOf(head) + m.notes.orEmpty().filterNot { it.startsWith("حالت آینه") }
+    }
+
+    /** اگر این دستگاه آینه است، فرمان برای دستگاه اصلی فرستاده می‌شود و true برمی‌گردد. */
+    private fun remote(type: String, args: Map<String, String> = emptyMap()): Boolean {
+        if (!container.sync.isFollower) return false
+        scope.launch(Dispatchers.IO) { toast(container.sync.send(type, args)) }
+        return true
+    }
+
+    /** ذخیره تنظیمات؛ در حالت آینه، تغییرات برای دستگاه اصلی هم فرستاده می‌شود. */
+    private suspend fun saveSettingsShared(new: com.saeidkazemi.trader.data.model.AppSettings, msg: String = "") {
+        val old = container.store.loadSettings()
+        container.store.saveSettings(new)
+        if (container.sync.isFollower) {
+            val patch = container.sync.settingsPatch(old, new) ?: return
+            val res = container.sync.send("settings", if (msg.isNotEmpty()) mapOf("msg" to msg) else emptyMap(), patch)
+            toast(res)
+        }
+    }
+
+    // ---- اتصال اندروید و ویندوز ----
+
+    fun syncBecomeHost() {
+        scope.launch(Dispatchers.IO) {
+            container.sync.becomeHost()
+            toast("این دستگاه «دستگاه اصلی» شد؛ کد اتصال را در دستگاه دیگر وارد کنید.")
+        }
+    }
+
+    fun syncBecomeFollower(code: String) {
+        scope.launch(Dispatchers.IO) {
+            if (!container.sync.becomeFollower(code)) {
+                toast("کد اتصال معتبر نیست (۱۰ حرف و عدد، مثل ABCDE-12345).")
+                return@launch
+            }
+            toast("در حال اتصال به دستگاه اصلی… این دستگاه از این به بعد خودش معامله نمی‌کند و وضعیت دستگاه اصلی را نشان می‌دهد.")
+            container.sync.syncNow()
+        }
+    }
+
+    fun syncTurnOff() {
+        scope.launch(Dispatchers.IO) {
+            val wasFollower = container.sync.isFollower
+            container.sync.turnOff()
+            toast(
+                if (wasFollower) "اتصال قطع شد؛ این دستگاه از آخرین وضعیت دریافتی، مستقل ادامه می‌دهد."
+                else "اتصال خاموش شد؛ این دستگاه مستقل کار می‌کند."
+            )
+        }
+    }
+
+    fun syncNewCode() {
+        scope.launch(Dispatchers.IO) {
+            container.sync.regenerateCode()
+            toast("کد اتصال جدید ساخته شد؛ دستگاه‌های قبلی دیگر وصل نمی‌شوند تا کد جدید را وارد کنند.")
+        }
+    }
+
+    fun syncSetLan(on: Boolean) { scope.launch(Dispatchers.IO) { container.sync.setLan(on) } }
+
+    fun syncSetRelay(on: Boolean) { scope.launch(Dispatchers.IO) { container.sync.setRelay(on) } }
+
+    fun syncSetHost(addr: String) {
+        scope.launch(Dispatchers.IO) {
+            container.sync.setManualHost(addr)
+            container.sync.syncNow()
+            toast(if (addr.isBlank()) "نشانی دستی پاک شد؛ دستگاه اصلی خودکار جستجو می‌شود." else "نشانی دستگاه اصلی ذخیره شد.")
+        }
+    }
+
+    fun syncSetRelayUrl(url: String) { scope.launch(Dispatchers.IO) { container.sync.setRelayUrl(url) } }
+
+    fun syncNow() {
+        container.sync.syncNow()
+        toast("همگام‌سازی…")
     }
 
     private fun buildFeed(digests: Map<String, com.saeidkazemi.trader.news.NewsDigest>): List<NewsFeedEntry> {
@@ -196,7 +291,7 @@ class TraderController(
     fun toggleAutoTrade(on: Boolean) {
         scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings().copy(autoTrade = on)
-            container.store.saveSettings(settings)
+            saveSettingsShared(settings)
             _state.update { it.copy(settings = settings) }
             hooks.onAutoTradeChanged(on)
             toast(
@@ -259,7 +354,7 @@ class TraderController(
         }
         scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings().copy(minWinRatePct = minWinRatePct, guardWindow = window)
-            container.store.saveSettings(settings)
+            saveSettingsShared(settings)
             val journal = container.tradeEngine.journal.all()
             _state.update { it.copy(settings = settings, perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings)) }
             toast(
@@ -307,6 +402,7 @@ class TraderController(
             toast("جمع درصدها باید ۱۰۰ باشد (الان " + com.saeidkazemi.trader.util.Format.num(sum, 1) + ").")
             return
         }
+        if (remote("allocations", mapOf("CRYPTO" to crypto.toString(), "IR_STOCK" to ir.toString(), "METAL" to metal.toString(), "FX" to fx.toString()))) return
         scope.launch(Dispatchers.IO) {
             val alloc = mapOf("CRYPTO" to crypto, "IR_STOCK" to ir, "METAL" to metal, "FX" to fx)
             val settings = container.store.loadSettings().copy(allocations = alloc)
@@ -327,6 +423,7 @@ class TraderController(
             toast("سرمایه معتبر وارد کنید.")
             return
         }
+        if (remote("capital", mapOf("usd" to amountUsd.toString()))) return
         scope.launch(Dispatchers.IO) {
             val s0 = container.store.loadSettings()
             val acc = container.broker.adjustCapital(amountUsd, s0.allocations)
@@ -343,6 +440,7 @@ class TraderController(
 
     /** اجرای دستی بک‌تست (چند ده ثانیه تا چند دقیقه؛ در پس‌زمینه). */
     fun runBacktest() {
+        if (remote("backtest")) return
         if (container.tradeEngine.backtestRunning) {
             toast("بک‌تست در حال اجراست…")
             return
@@ -396,6 +494,7 @@ class TraderController(
             toast("سرمایه معتبر وارد کنید.")
             return
         }
+        if (remote("reset", mapOf("usd" to amountUsd.toString()))) return
         scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings().copy(capitalUsd = amountUsd)
             container.store.saveSettings(settings)
@@ -433,7 +532,7 @@ class TraderController(
     private fun updateSettings(change: (com.saeidkazemi.trader.data.model.AppSettings) -> com.saeidkazemi.trader.data.model.AppSettings) {
         scope.launch(Dispatchers.IO) {
             val settings = change(container.store.loadSettings())
-            container.store.saveSettings(settings)
+            saveSettingsShared(settings)
             _state.update { it.copy(settings = settings, perf = com.saeidkazemi.trader.analysis.Performance.report(it.journal, settings)) }
         }
     }
@@ -446,6 +545,7 @@ class TraderController(
             toast("مبلغ معتبر (دلار) وارد کنید.")
             return
         }
+        if (remote("buy", mapOf("asset" to assetId, "usd" to amount.toString()))) return
         scope.launch(Dispatchers.IO) {
             val msg = container.tradeEngine.manualBuy(assetId, amount)
             syncAccount()
@@ -454,6 +554,7 @@ class TraderController(
     }
 
     fun manualSell(assetId: String) {
+        if (remote("sell", mapOf("asset" to assetId))) return
         scope.launch(Dispatchers.IO) {
             val msg = container.tradeEngine.manualSell(assetId)
             syncAccount()

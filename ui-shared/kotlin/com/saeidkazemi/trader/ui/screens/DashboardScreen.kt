@@ -71,6 +71,8 @@ fun DashboardScreen(
                 }
             }
 
+            com.saeidkazemi.trader.ui.components.SyncBanner(state.sync)
+
             if (state.error != null) {
                 Text(
                     text = state.error!!,

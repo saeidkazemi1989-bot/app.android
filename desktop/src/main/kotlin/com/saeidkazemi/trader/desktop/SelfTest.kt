@@ -273,6 +273,82 @@ fun runSelfTest(outDir: File): Int {
                 out("bt ${m.market.name} a=${m.assets} d=${m.days} applied=${m.applied} hit60=${m.reachedTarget} | CUR ${pp(m.current)} IN ${f(m.currentIn)} OUT ${f(m.currentOut)} | BEST ${pp(m.best)} IN ${f(m.bestIn)} OUT ${f(m.bestOut)} | exits=${m.exitMix}")
             }
         }
+        // ---- آزمون اتصال اندروید و ویندوز: دستگاه اصلی (همین) + آینه (دستگاه دوم) ----
+        var followerForShot: AppContainer? = null
+        try {
+            val host = container
+            host.sync.start(com.saeidkazemi.trader.sync.SyncRole.OFF, "selftest-host")
+            host.sync.becomeHost()
+            val code = host.sync.status.value.code
+            val port = host.sync.status.value.localAddresses.firstOrNull()?.substringAfterLast(':') ?: "47631"
+            out("sync host code=${code.length} addrs=${host.sync.status.value.localAddresses} msg=${host.sync.status.value.message}")
+            val f = AppContainer(Files.createTempDirectory("moameleyar-follower").toFile())
+            followerForShot = f
+            f.sync.start(com.saeidkazemi.trader.sync.SyncRole.OFF, "selftest-follower")
+            f.sync.setRelay(false)
+            f.sync.setManualHost("127.0.0.1:$port")
+            val okF = f.sync.becomeFollower(code)
+            val t0 = System.currentTimeMillis()
+            runBlocking { withTimeoutOrNull(40_000) { while (f.sync.mirror == null) delay(300) } }
+            val ha = host.broker.account()
+            val fa = f.broker.account()
+            out(
+                "sync lan follower=$okF mirrored=${f.sync.mirror != null} t=${(System.currentTimeMillis() - t0) / 1000}s " +
+                    "pos=${fa.positions.size}/${ha.positions.size} cash=${"%.2f".format(fa.cashUsd)}/${"%.2f".format(ha.cashUsd)} " +
+                    "journal=${f.tradeEngine.journal.all().size}/${host.tradeEngine.journal.all().size} bt=${f.tradeEngine.backtest?.results?.size}/${host.tradeEngine.backtest?.results?.size} " +
+                    "act=${f.tradeEngine.lastActivity.size} followerMode=${f.tradeEngine.followerMode} ch=${f.sync.status.value.channel}"
+            )
+            // فرمان خرید از آینه
+            val held = ha.positions.map { it.assetId }.toSet()
+            val cand = host.marketDataService.cachedAssets().firstOrNull {
+                it.market == MarketKind.CRYPTO && !it.isSimulated && !it.isDisplayOnly && it.id !in held
+            }
+            if (cand != null) {
+                val msg = runBlocking { f.sync.send("buy", mapOf("asset" to cand.id, "usd" to "15")) }
+                runBlocking { withTimeoutOrNull(20_000) { while (f.broker.account().positions.none { it.assetId == cand.id }) delay(300) } }
+                out("sync lan-cmd buy ${cand.symbol}: hostHas=${host.broker.account().positions.any { it.assetId == cand.id }} mirrorHas=${f.broker.account().positions.any { it.assetId == cand.id }} msg=${msg.take(120)}")
+            }
+            val old = f.store.loadSettings()
+            val patch = f.sync.settingsPatch(old, old.copy(profitLockTriggerPct = 12.0, soundAlerts = !old.soundAlerts))
+            val pm = runBlocking { f.sync.send("settings", mapOf("msg" to "ok"), patch) }
+            out("sync lan-settings patch=$patch hostTrigger=${host.store.loadSettings().profitLockTriggerPct} hostSound=${host.store.loadSettings().soundAlerts} msg=$pm")
+
+            // مسیر اینترنتی (ntfy)
+            host.sync.setLan(false)
+            f.sync.setLan(false)
+            f.sync.setRelay(true)
+            val t1 = System.currentTimeMillis()
+            runBlocking {
+                withTimeoutOrNull(100_000) {
+                    while (!(f.sync.status.value.lastSyncAt > t1 && f.sync.status.value.channel == "اینترنت")) delay(1000)
+                }
+            }
+            val st = f.sync.status.value
+            out("sync relay ok=${st.lastSyncAt > t1} t=${(System.currentTimeMillis() - t1) / 1000}s ch=${st.channel} msg=${st.message} hostMsg=${host.sync.status.value.message}")
+            if (cand != null && st.lastSyncAt > t1) {
+                val t2 = System.currentTimeMillis()
+                val msg = runBlocking { f.sync.send("sell", mapOf("asset" to cand.id)) }
+                runBlocking {
+                    withTimeoutOrNull(170_000) {
+                        while (f.broker.account().positions.any { it.assetId == cand.id }) { f.sync.syncNow(); delay(15_000) }
+                    }
+                }
+                out("sync relay-cmd sell t=${(System.currentTimeMillis() - t2) / 1000}s hostHas=${host.broker.account().positions.any { it.assetId == cand.id }} mirrorHas=${f.broker.account().positions.any { it.assetId == cand.id }} msg=${msg.take(100)}")
+            }
+            host.sync.setLan(true)
+        } catch (e: Throwable) {
+            out("sync ERROR $e")
+        }
+        followerForShot?.let { fc ->
+            shot("15-sync", 760, 1500) {
+                androidx.compose.foundation.layout.Column {
+                    com.saeidkazemi.trader.ui.components.SyncBanner(fc.sync.status.value)
+                    com.saeidkazemi.trader.ui.components.SyncSettingsCard(fc.sync.status.value, true, controller)
+                    androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.padding(8.dp))
+                    com.saeidkazemi.trader.ui.components.SyncSettingsCard(container.sync.status.value, false, controller)
+                }
+            }
+        }
         shot("14-backtest", 760, 2200) {
             val s by controller.state.collectAsState()
             com.saeidkazemi.trader.ui.components.BacktestCard(

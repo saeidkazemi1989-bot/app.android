@@ -35,6 +35,9 @@ class AppContainer(dataDir: File) {
         news = newsService
     )
 
+    /** اتصال اندروید و ویندوز (دستگاه اصلی / آینه). */
+    val sync = com.saeidkazemi.trader.sync.SyncManager(this)
+
     companion object {
         const val CHANNEL_SERVICE = "trader_service"
         const val CHANNEL_TRADES = "trader_trades"

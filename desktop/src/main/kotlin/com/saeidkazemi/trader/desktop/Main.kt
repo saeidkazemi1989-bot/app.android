@@ -61,6 +61,11 @@ fun main(args: Array<String>) {
     val notifier = TrayNotifier()
     val controller = TraderController(container, scope, DesktopHooks(notifier))
     SoundAlerts.attach(container, scope)
+    // اتصال به گوشی: پیش‌فرض مستقل تا کاربر کد اتصال گوشی را وارد کند
+    container.sync.start(
+        com.saeidkazemi.trader.sync.SyncRole.OFF,
+        "ویندوز " + (try { java.net.InetAddress.getLocalHost().hostName } catch (_: Exception) { System.getenv("COMPUTERNAME") ?: "" })
+    )
     controller.start()
 
     application {

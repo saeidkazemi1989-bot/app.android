@@ -764,12 +764,36 @@ class TradeEngine(
         }
     }
 
+    /**
+     * حالت آینه (اتصال به دستگاه اصلی): این دستگاه فقط تحلیل و نمایش می‌کند؛ خرید، فروش، حد ضرر متحرک،
+     * قفل سود و بک‌تست را دستگاه اصلی انجام می‌دهد و حساب و ژورنال از آن دریافت می‌شود.
+     */
+    @Volatile
+    var followerMode: Boolean = false
+
+    /** جایگزینی وضعیت با وضعیت دستگاه اصلی (زیر همان قفل دور معامله تا تداخلی پیش نیاید). */
+    suspend fun applyMirror(
+        settings: AppSettings,
+        account: AccountState,
+        journalEntries: List<com.saeidkazemi.trader.data.model.JournalEntry>,
+        report: Backtest.Report?,
+        activity: List<MarketActivity>
+    ) = mutex.withLock {
+        store.saveSettings(settings)
+        broker.replaceAccount(account)
+        journal.replaceAll(journalEntries)
+        backtest = report
+        if (report != null) try { store.saveBacktest(report) } catch (_: Exception) { }
+        lastActivity = activity
+    }
+
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
-        ensureJournal()
+        val manage = !followerMode
+        if (manage) ensureJournal()
         val buys = mutableListOf<String>()
         val sells = mutableListOf<String>()
         val notes = mutableListOf<String>()
-        try {
+        if (manage) try {
             migrateMetal(notes)
         } catch (_: Exception) {
         }
@@ -822,7 +846,7 @@ class TradeEngine(
             notes.add("تحلیل " + deferred.size + " سهم دیگر در دورهای بعدی انجام می‌شود (پویش تدریجی کل بازار).")
         }
 
-        migrateFxLocks(settings, notes)
+        if (manage) migrateFxLocks(settings, notes)
 
         // اصلاح موقعیت‌های سهام پس از افزایش سرمایه/تقسیم سود (تا افت قیمت پس از مجمع، زیان کاذب یا حد ضرر نسازد).
         for (pos in broker.account().positions) {
@@ -924,12 +948,12 @@ class TradeEngine(
         val priceMap = assets.associate { it.id to usdPriceFor(it, settings, heldPositions) }
 
         // ۵) حد ضرر متحرک: با هر قله تازه، حد ضرر بالا کشیده می‌شود تا سود قفل شود.
-        broker.trail(priceMap)
+        if (manage) broker.trail(priceMap)
 
         // ۵-ب) قفل سود: وقتی سود خالص (پس از کارمزد) به آستانه (پیش‌فرض ۱۰٪) رسید، حد ضرر روی قیمتی می‌رود
         // که فروش در آن همان سود (پیش‌فرض ۱۰٪) را حفظ کند. از آن به بعد، معامله دیگر نمی‌تواند زیان‌ده یا کم‌سودتر بسته شود
         // (مگر پرش ناگهانی قیمت یا صف فروش). اگر قیمت باز هم بالا برود، حد ضرر متحرک آن را بالاتر می‌برد.
-        if (settings.profitLock) {
+        if (settings.profitLock && manage) {
             for (pos in broker.account().positions) {
                 val cur = priceMap[pos.assetId] ?: continue
                 if (!cur.isFinite() || cur <= 0) continue
@@ -952,7 +976,7 @@ class TradeEngine(
         }
 
         // ۶) مدیریت ریسک و فروش موقعیت‌های باز
-        for (pos in broker.account().positions) {
+        for (pos in if (manage) broker.account().positions else emptyList()) {
             val asset = assetMap[pos.assetId] ?: continue
             val curUsd = priceMap[asset.id] ?: continue
             if (!curUsd.isFinite() || curUsd <= 0) continue
@@ -992,7 +1016,7 @@ class TradeEngine(
 
         // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
         val activity = ArrayList<MarketActivity>()
-        if (settings.autoTrade) {
+        if (settings.autoTrade && manage) {
             for (m in riskManager.tradableMarkets) {
                 if (settings.allocationPct(m) <= 0.0) continue
                 val plan = planFor(settings, m)
@@ -1112,11 +1136,12 @@ class TradeEngine(
             }
             if (signals.isEmpty()) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")
         }
-        lastActivity = activity
-
-        store.saveAccount(broker.account())
+        if (manage) {
+            lastActivity = activity
+            store.saveAccount(broker.account())
+        }
         tracker.record(broker.account().positions, priceMap)
-        maybeStartBacktest()
+        if (manage) maybeStartBacktest()
         val report = CycleReport(
             ts = System.currentTimeMillis(),
             trigger = trigger,

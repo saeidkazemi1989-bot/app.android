@@ -64,6 +64,8 @@ data class SleeveStat(
 }
 
 data class UiState(
+    /** وضعیت اتصال اندروید و ویندوز. */
+    val sync: com.saeidkazemi.trader.sync.SyncStatus = com.saeidkazemi.trader.sync.SyncStatus(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,
     val error: String? = null,

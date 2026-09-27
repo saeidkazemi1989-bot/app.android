@@ -39,6 +39,12 @@ class TradeJournal(private val store: JsonStore?) {
     /** همه ردیف‌ها، جدیدترین اول. */
     fun all(): List<JournalEntry> = synchronized(lock) { ensure().sortedByDescending { it.openedAt } }
 
+    /** حالت آینه: ژورنال دستگاه اصلی جایگزین ژورنال این دستگاه می‌شود. */
+    fun replaceAll(list: List<JournalEntry>) = synchronized(lock) {
+        entries = list.toMutableList()
+        save(list)
+    }
+
     fun isEmpty(): Boolean = synchronized(lock) { ensure().isEmpty() }
 
     fun open(entry: JournalEntry) = synchronized(lock) {

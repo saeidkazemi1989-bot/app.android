@@ -131,6 +131,12 @@ class PaperBroker(private val store: JsonStore) : Broker {
 
     override fun account(): AccountState = synchronized(lock) { ensure() }
 
+    /** حالت آینه: حساب دستگاه اصلی جایگزین حساب این دستگاه می‌شود. */
+    fun replaceAccount(a: AccountState) = synchronized(lock) {
+        acc = a
+        store.saveAccount(a)
+    }
+
     fun reset(capitalUsd: Double, allocations: Map<String, Double> = store.loadSettings().allocations): AccountState = synchronized(lock) {
         val alloc = normalizedAlloc(allocations)
         val split = alloc.mapValues { (_, pct) -> capitalUsd * pct }

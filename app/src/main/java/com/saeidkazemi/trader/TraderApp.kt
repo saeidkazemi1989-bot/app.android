@@ -29,6 +29,13 @@ class TraderApp : Application() {
         createNotificationChannels()
         container = AppContainer(filesDir)
         alerts = AlertPlayer(this)
+        // اتصال به ویندوز: گوشی پیش‌فرض «دستگاه اصلی» است (کد اتصال در تنظیمات)
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            container.sync.start(
+                com.saeidkazemi.trader.sync.SyncRole.HOST,
+                "گوشی " + ((android.os.Build.MANUFACTURER ?: "") + " " + (android.os.Build.MODEL ?: "")).trim()
+            )
+        }
         appScope.launch {
             container.tradeEngine.events.collect { ev -> onTradeEvent(ev) }
         }
