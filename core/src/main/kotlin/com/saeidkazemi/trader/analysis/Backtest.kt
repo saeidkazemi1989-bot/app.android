@@ -362,37 +362,55 @@ object Backtest {
         val (curIn, curOut) = evalP(current)
         val minN = minTrades(m, series.size)
         val candidates = grid(m)
-        var best: Params? = null
-        var bestIn: Stats? = null
-        var bestScore = Double.NEGATIVE_INFINITY
-        var fallback: Params? = null
-        var fallbackIn: Stats? = null
+        // پایداری بدون نگاه به داده آزمون: بخش درون نمونه دو نیمه می‌شود و پارامتر باید در هر دو نیمه خوب باشد.
+        val half = fromT + (split - fromT) / 2
+        var target: Params? = null
+        var targetIn: Stats? = null
+        var targetScore = Double.NEGATIVE_INFINITY
+        var profit: Params? = null
+        var profitIn: Stats? = null
+        var profitScore = Double.NEGATIVE_INFINITY
         for (p in candidates) {
             val tr = simulate(series, p, settings)
-            val sIn = stats(tr.filter { it.entryT < split })
+            val inTr = tr.filter { it.entryT < split }
+            val sIn = stats(inTr)
             if (sIn.trades < minN || sIn.expectancyPct <= 0 || sIn.profitFactor < 1.1) continue
-            if (sIn.winRate >= TARGET_WIN_RATE && sIn.rr >= 0.7) {
-                // سود کل با جریمه افت سرمایه و کمی ترجیح برای تعداد معامله بیشتر (اعتبار آماری)
-                val sc = sIn.sumPct - 0.5 * sIn.maxDrawdownPct + sqrt(sIn.trades.toDouble())
-                if (sc > bestScore) { bestScore = sc; best = p; bestIn = sIn }
-            } else if (best == null) {
-                val fs = sIn.winRate + sIn.expectancyPct
-                val cur = fallbackIn
-                if (cur == null || fs > cur.winRate + cur.expectancyPct) { fallback = p; fallbackIn = sIn }
+            val s1 = stats(inTr.filter { it.entryT < half })
+            val s2 = stats(inTr.filter { it.entryT >= half })
+            if (s1.expectancyPct <= 0 || s2.expectancyPct <= 0 || s1.trades < 3 || s2.trades < 3) continue
+            val robust = minOf(s1.sumPct, s2.sumPct) - 0.25 * sIn.maxDrawdownPct + sqrt(sIn.trades.toDouble())
+            if (sIn.winRate >= TARGET_WIN_RATE && sIn.rr >= 0.7 && minOf(s1.winRate, s2.winRate) >= TARGET_WIN_RATE - 5) {
+                if (robust > targetScore) { targetScore = robust; target = p; targetIn = sIn }
             }
+            if (robust > profitScore) { profitScore = robust; profit = p; profitIn = sIn }
         }
-        val reached = best != null
-        val chosen = best ?: fallback
-        val chosenIn = bestIn ?: fallbackIn
-        val chosenOut = chosen?.let { evalP(it).second }
-        val oosOk = chosenOut != null && chosenOut.trades >= 3 && chosenOut.expectancyPct > 0 && chosenOut.profitFactor >= 1.0
-        val applied = chosen != null && oosOk
-        val verdict = when {
-            chosen == null -> "هیچ ترکیبی روی این داده سودده نبود؛ تنظیمات فعلی حفظ شد."
-            reached && applied -> "به هدف نرخ برد " + TARGET_WIN_RATE.toInt() + "٪ رسید و در آزمون خارج از نمونه هم سودده بود؛ روی معاملات واقعی اعمال شد."
-            reached -> "درون نمونه به " + TARGET_WIN_RATE.toInt() + "٪ رسید ولی در آزمون خارج از نمونه تأیید نشد (احتمال بیش‌برازش)؛ اعمال نشد."
-            applied -> "با امید ریاضی مثبت به " + TARGET_WIN_RATE.toInt() + "٪ نرسید؛ بهترین نرخ برد سودده (" + Math.round(chosenIn?.winRate ?: 0.0) + "٪) اعمال شد چون در آزمون هم سودده بود."
-            else -> "به " + TARGET_WIN_RATE.toInt() + "٪ نرسید و بهترین گزینه در آزمون هم تأیید نشد؛ تنظیمات فعلی حفظ شد."
+        fun oosOk(o: Stats?): Boolean = o != null && o.trades >= 3 && o.expectancyPct > 0 && o.profitFactor >= 1.0
+        val targetOut = target?.let { evalP(it).second }
+        val profitOut = profit?.let { if (it == target) targetOut else evalP(it).second }
+        val reached = target != null
+        val chosen: Params?
+        val chosenIn: Stats?
+        val chosenOut: Stats?
+        val applied: Boolean
+        val verdict: String
+        val t60 = TARGET_WIN_RATE.toInt()
+        when {
+            target != null && oosOk(targetOut) -> {
+                chosen = target; chosenIn = targetIn; chosenOut = targetOut; applied = true
+                verdict = "به هدف نرخ برد " + t60 + "٪ رسید و در آزمون روی داده دیده‌نشده هم سودده بود (برد " +
+                    Math.round(targetOut!!.winRate) + "٪)؛ روی خریدهای جدید اعمال شد."
+            }
+            profit != null && oosOk(profitOut) -> {
+                chosen = profit; chosenIn = profitIn; chosenOut = profitOut; applied = true
+                verdict = (if (target != null) "ترکیب با برد " + Math.round(targetIn!!.winRate) + "٪ فقط روی گذشته خوب بود و در آزمون زیان داد (برد " +
+                    Math.round(targetOut?.winRate ?: 0.0) + "٪)؛ " else "هیچ ترکیب سوددهی به برد " + t60 + "٪ نرسید؛ ") +
+                    "به‌جایش پایدارترین ترکیب سودده اعمال شد (برد آزمون " + Math.round(profitOut!!.winRate) + "٪، سود بیشتر از زیان‌ها)."
+            }
+            else -> {
+                chosen = target ?: profit; chosenIn = targetIn ?: profitIn; chosenOut = targetOut ?: profitOut; applied = false
+                verdict = if (chosen == null) "هیچ ترکیبی روی این داده پایدار و سودده نبود؛ تنظیمات فعلی حفظ شد."
+                else "بهترین ترکیب در آزمون روی داده دیده‌نشده تأیید نشد (احتمال بیش‌برازش)؛ تنظیمات فعلی حفظ شد."
+            }
         }
         val mix = chosen?.let { p -> simulate(series, p, settings).groupingBy { it.reason }.eachCount() } ?: emptyMap()
         return MarketResult(
@@ -407,7 +425,7 @@ object Backtest {
             best = chosen,
             bestIn = chosenIn,
             bestOut = chosenOut,
-            reachedTarget = reached,
+            reachedTarget = reached && applied && chosen == target,
             applied = applied,
             verdict = verdict,
             tested = candidates.size,
