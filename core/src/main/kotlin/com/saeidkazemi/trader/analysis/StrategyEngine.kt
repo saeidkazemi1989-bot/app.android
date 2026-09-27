@@ -138,7 +138,7 @@ class StrategyEngine {
                     .filter { kotlin.math.abs(it.sentiment) >= 0.3 }
                     .maxByOrNull { kotlin.math.abs(it.sentiment) }
                 if (top != null) {
-                    reasons.add((if (top.sentiment > 0) "خبر مثبت: «" else "خبر منفی: «") + top.title.take(80) + "»")
+                    reasons.add((if (top.sentiment > 0) "خبر مثبت: «" else "خبر منفی: «") + top.displayTitle.take(80) + "»")
                 }
             }
             if (blocked) reasons.add(news.blockReason ?: "خبر منفی مهم؛ خرید متوقف شد")

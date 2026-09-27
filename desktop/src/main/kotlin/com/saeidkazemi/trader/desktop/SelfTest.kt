@@ -167,6 +167,9 @@ fun runSelfTest(outDir: File): Int {
                 val d = container.tradeEngine.newsFor(a, force = true)
                 out("news ${a.id} ${a.symbol}: items=${d.items.size} score=${"%.2f".format(d.score)} adj=${d.adjustment} ok=${d.sourcesOk} failed=${d.sourcesFailed} block=${d.blockBuy}")
                 d.items.take(4).forEach { n -> out("   [${n.kind}] ${"%.2f".format(n.sentiment)} ${n.title.take(110)}") }
+                if (a.id == "bitcoin" || a.market == MarketKind.FX) d.items.take(4).forEach { n ->
+                    out("tr ${a.symbol} fa=${n.titleFa != null} | ${n.displayTitle.take(90)} | ${n.title.take(60)}")
+                }
             }
         }
         if (st.assets.isEmpty() || st.signals.isEmpty()) exit = 2

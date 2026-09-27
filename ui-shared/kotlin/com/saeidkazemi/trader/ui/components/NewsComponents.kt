@@ -117,7 +117,7 @@ fun NewsItemRow(
             )
         }
         Text(
-            item.title,
+            item.displayTitle,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 3,
@@ -125,6 +125,24 @@ fun NewsItemRow(
             modifier = Modifier.padding(top = 6.dp),
             lineHeight = 20.sp
         )
+        if (item.titleFa != null) {
+            Text(
+                "ترجمه خودکار • متن اصلی: " + item.title,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+                lineHeight = 15.sp
+            )
+        } else if (item.lang == "en") {
+            Text(
+                "(ترجمه در دسترس نبود؛ متن اصلی انگلیسی)",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
         if (item.summary.isNotBlank() && item.summary != item.title) {
             Text(
                 item.summary,

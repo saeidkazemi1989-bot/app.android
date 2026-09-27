@@ -619,7 +619,7 @@ class TradeEngine(
                     metrics = sig?.metrics,
                     newsLabel = digest?.label ?: sig?.newsLabel,
                     newsHeadlines = digest?.items?.take(5)?.map { n ->
-                        "[" + n.kind.faTitle + " • " + n.sentimentLabel + "] " + n.title
+                        "[" + n.kind.faTitle + " • " + n.sentimentLabel + "] " + n.displayTitle + (if (n.titleFa != null) " (اصل: " + n.title + ")" else "")
                     },
                     newsSourcesOk = digest?.sourcesOk,
                     newsSourcesFailed = digest?.sourcesFailed,

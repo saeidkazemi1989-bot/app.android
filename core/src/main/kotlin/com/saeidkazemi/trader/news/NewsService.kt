@@ -123,7 +123,17 @@ class NewsService(
             .distinctBy { Sentiment.normalizeFa(it.title).lowercase().take(80) }
             .sortedByDescending { it.publishedAt ?: 0L }
             .take(20)
+            .let { translate(it) }
         return summarize(asset, dedup, ok.distinct(), failed.distinct())
+    }
+
+    /** ترجمه تیتر اخبار انگلیسی به فارسی؛ اگر سرویس ترجمه در دسترس نبود، متن اصلی می‌ماند. */
+    private fun translate(items: List<NewsItem>): List<NewsItem> {
+        val en = items.filter { it.lang != "fa" && !Translator.looksPersian(it.title) }
+        if (en.isEmpty()) return items
+        val map = try { Translator.toPersian(en.map { it.title.trim() }) } catch (e: Exception) { emptyMap() }
+        if (map.isEmpty()) return items
+        return items.map { n -> map[n.title.trim()]?.let { n.copy(titleFa = it) } ?: n }
     }
 
     /** صفحه‌های تبدیل قیمت و «پیش‌بینی قیمت» خبر نیستند و فقط نویز اضافه می‌کنند. */
@@ -185,7 +195,7 @@ class NewsService(
             if (blockReason == null && ageH != null && ageH <= 24.0 && n.sentiment <= -0.6 &&
                 (n.isOfficial || n.sentiment <= -0.75)
             ) {
-                blockReason = "خبر منفی مهم در ۲۴ ساعت اخیر: «" + n.title.take(70) + "»"
+                blockReason = "خبر منفی مهم در ۲۴ ساعت اخیر: «" + n.displayTitle.take(70) + "»"
             }
         }
         val score = if (wSum > 0) sSum / wSum else 0.0

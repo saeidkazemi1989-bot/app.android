@@ -19,8 +19,13 @@ data class NewsItem(
     val sentiment: Double,
     /** کلیدواژه‌هایی که باعث امتیاز شدند (برای شفافیت). */
     val matched: List<String>,
-    val lang: String
+    val lang: String,
+    /** ترجمه فارسی تیتر (برای اخبار انگلیسی)؛ null یعنی ترجمه در دسترس نبود. */
+    val titleFa: String? = null
 ) {
+    /** تیتری که به کاربر نشان داده می‌شود: ترجمه فارسی اگر باشد، وگرنه متن اصلی. */
+    val displayTitle: String get() = titleFa?.takeIf { it.isNotBlank() } ?: title
+
     val isOfficial: Boolean get() = kind == NewsSourceKind.CODAL || kind == NewsSourceKind.CODAL_TELEGRAM
 
     val sentimentLabel: String

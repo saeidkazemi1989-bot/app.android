@@ -110,7 +110,7 @@ jobs:
           if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(bt |activity |screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(tr |screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
       - name: Publish trend screenshots as git blobs (for review via API)
         if: always()
@@ -119,7 +119,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          foreach ($n in @("14-backtest")) {
+          foreach ($n in @("3-news")) {
             $f = "selftest/$n.png"
             if (Test-Path $f) {
               $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f))
