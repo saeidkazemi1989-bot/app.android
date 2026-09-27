@@ -273,8 +273,8 @@ class TraderController(
      * تقسیم سرمایه بین بازارها (درصد). چون هر بازار صندوق جداگانه دارد، حساب دمو با همان سرمایه
      * و تقسیم‌بندی جدید از نو ساخته می‌شود.
      */
-    fun setAllocationsAndReset(crypto: Double, ir: Double, fx: Double) {
-        val vals = listOf(crypto, ir, fx)
+    fun setAllocationsAndReset(crypto: Double, ir: Double, metal: Double, fx: Double) {
+        val vals = listOf(crypto, ir, metal, fx)
         if (vals.any { !it.isFinite() || it < 0 }) {
             toast("درصدهای معتبر وارد کنید.")
             return
@@ -285,7 +285,7 @@ class TraderController(
             return
         }
         scope.launch(Dispatchers.IO) {
-            val alloc = mapOf("CRYPTO" to crypto, "IR_STOCK" to ir, "FX" to fx)
+            val alloc = mapOf("CRYPTO" to crypto, "IR_STOCK" to ir, "METAL" to metal, "FX" to fx)
             val settings = container.store.loadSettings().copy(allocations = alloc)
             container.store.saveSettings(settings)
             container.broker.reset(settings.capitalUsd, alloc)

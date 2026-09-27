@@ -42,11 +42,29 @@ class PaperBroker(private val store: JsonStore) : Broker {
     }
 
     private fun normalizedAlloc(raw: Map<String, Double>): Map<String, Double> {
-        val keys = listOf(MarketKind.CRYPTO.name, MarketKind.IR_STOCK.name, MarketKind.FX.name)
+        val keys = MarketKind.TRADED.map { it.name }
         val vals = keys.associateWith { maxOf(0.0, raw[it] ?: 0.0) }
         val sum = vals.values.sum()
-        return if (sum <= 0) mapOf(MarketKind.CRYPTO.name to 1.0, MarketKind.IR_STOCK.name to 0.0, MarketKind.FX.name to 0.0)
+        return if (sum <= 0) keys.associateWith { if (it == MarketKind.CRYPTO.name) 1.0 else 0.0 }
         else vals.mapValues { it.value / sum }
+    }
+
+    /**
+     * انتقال کامل نقد و سرمایه یک بازار به بازار دیگر بدون ساختن دوباره حساب (سود قبلی حفظ می‌شود).
+     * فقط وقتی انجام می‌شود که بازار مبدأ موقعیت باز نداشته باشد.
+     * @return مبلغ منتقل‌شده (دلار) یا null اگر انجام نشد.
+     */
+    fun moveSleeve(from: MarketKind, to: MarketKind): Double? = synchronized(lock) {
+        val a = ensure()
+        if (from == to || a.positions.any { it.market == from }) return@synchronized null
+        val cash = a.cashByMarket[from.name] ?: 0.0
+        val next = a.copy(
+            cashByMarket = a.cashByMarket + (from.name to 0.0) + (to.name to (a.cashByMarket[to.name] ?: 0.0) + cash),
+            capitalByMarket = a.capitalByMarket + (from.name to 0.0) + (to.name to (a.capitalByMarket[to.name] ?: 0.0) + cash)
+        )
+        acc = next
+        store.saveAccount(next)
+        cash
     }
 
     /** نقد آزاد یک بازار. */

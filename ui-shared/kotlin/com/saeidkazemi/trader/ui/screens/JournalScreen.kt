@@ -141,7 +141,7 @@ fun JournalScreen(
         item {
             Card {
                 Text("هر بازار و محافظ نرخ برد", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).forEach { m ->
+                MarketKind.TRADED.forEach { m ->
                     val ms = perf.byMarket[m] ?: PerfStats()
                     val g = perf.guards.firstOrNull { it.market == m }
                     Row(
@@ -222,7 +222,7 @@ fun JournalScreen(
                 }
                 Text(
                     "وضعیت الان — ارز دیجیتال: " + live(MarketKind.CRYPTO) + " • بورس: " + live(MarketKind.IR_STOCK) +
-                        " • ارز خارجی: " + live(MarketKind.FX) + " • نرخ دلار: " +
+                        " • طلا و دلار: " + live(MarketKind.METAL) + " • ارز خارجی: " + live(MarketKind.FX) + " • نرخ دلار: " +
                         (if (state.rateIsFallback) "⚠ پشتیبان تنظیمات" else "زنده") + " (" + Format.num(state.usdIrr, 0) + " ریال)",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -239,7 +239,7 @@ fun JournalScreen(
                     )
                 }
                 if (open) {
-                    listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX, MarketKind.METAL).forEach { m ->
+                    MarketKind.TRADED.forEach { m ->
                         Text(m.faTitle, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
                         DataSources.forMarket(m).forEach {
                             Text("• $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))

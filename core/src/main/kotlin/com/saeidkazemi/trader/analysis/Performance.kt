@@ -70,7 +70,7 @@ object Performance {
     /** ضریب حجم هر خرید وقتی محافظ فعال است. */
     const val GUARD_SIZE_FACTOR = 0.5
 
-    val TRADED_MARKETS = listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
+    val TRADED_MARKETS = MarketKind.TRADED
 
     fun stats(entries: List<JournalEntry>): PerfStats {
         val closed = entries.filter { !it.isOpen && it.pnlUsd != null }.sortedBy { it.closedAt }

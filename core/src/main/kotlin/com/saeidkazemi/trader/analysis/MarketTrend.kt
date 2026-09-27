@@ -160,7 +160,7 @@ object MarketTrend {
             MarketKind.CRYPTO -> "شاخص هم‌وزن " + used.size + " ارز دیجیتال"
             MarketKind.IR_STOCK -> "شاخص هم‌وزن " + used.size + " سهم نقدشونده بورس و فرابورس"
             MarketKind.FX -> "میانگین " + used.size + " ارز خارجی در برابر دلار"
-            MarketKind.METAL -> "فلزات"
+            MarketKind.METAL -> "شاخص هم‌وزن " + used.size + " دارایی طلا و دلار (تومانی)"
         }
         return MarketTrendReport(
             market = market,

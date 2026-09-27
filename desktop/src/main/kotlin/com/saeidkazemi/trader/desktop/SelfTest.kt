@@ -120,10 +120,25 @@ fun runSelfTest(outDir: File): Int {
             out("fees " + com.saeidkazemi.trader.trading.Fees.table(set).joinToString(" | ") {
                 it.market.name + " buy=" + com.saeidkazemi.trader.util.Format.trim(it.buyPct, 4) + " sell=" + com.saeidkazemi.trader.util.Format.trim(it.sellPct, 4) + " real=" + it.real
             })
-            val sp = (st.assets.filter { it.market == MarketKind.CRYPTO }.take(6) + st.assets.filter { it.market == MarketKind.IR_STOCK }.take(3))
+            val sp = (st.assets.filter { it.market == MarketKind.CRYPTO }.take(6) + st.assets.filter { it.market == MarketKind.IR_STOCK }.take(3) +
+                st.assets.filter { it.market == MarketKind.METAL && !it.isDisplayOnly })
                 .joinToString(" ") { it.symbol + "=" + "%.3f".format(container.tradeEngine.halfSpread(it, null) * 100) }
             val j0 = container.tradeEngine.journal.all().firstOrNull()
             out("fees halfSpread% " + sp + " | journal buySpread=" + j0?.buySpreadPct?.let { "%.3f".format(it) } + " feePct=" + j0?.let { if (it.amountUsd > 0) "%.3f".format(it.buyFeeUsd / it.amountUsd * 100) else null })
+        }
+        run {
+            val set = container.store.loadSettings()
+            val acc = container.broker.account()
+            out("metal alloc=" + set.allocations + " cashMETAL=" + "%.2f".format(acc.cashByMarket["METAL"] ?: -1.0) +
+                " cashFX=" + "%.2f".format(acc.cashByMarket["FX"] ?: -1.0) + " pos=" + acc.positions.count { it.market == MarketKind.METAL })
+            st.assets.filter { it.market == MarketKind.METAL }.forEach { a ->
+                val h = container.marketDataService.cachedHistory(a.id).orEmpty()
+                val sg = container.tradeEngine.lastSignals.firstOrNull { it.assetId == a.id }
+                out("metal ${a.id} ${a.symbol} price=${"%.0f".format(a.price)} ${a.baseCurrency} bid=${a.bidPrice?.let { "%.0f".format(it) }} ask=${a.askPrice?.let { "%.0f".format(it) }} " +
+                    "chg=${a.changePct24h?.let { "%.2f".format(it) }} hist=${h.size} last=${h.lastOrNull()?.price?.let { "%.0f".format(it) }} " +
+                    "score=${sg?.score} action=${sg?.action} display=${a.isDisplayOnly} sim=${a.isSimulated} " +
+                    "fee=${"%.4f".format(com.saeidkazemi.trader.trading.Fees.commission(a, null, true, set) * 100)}")
+            }
         }
         container.tradeEngine.lastActivity.forEach { a ->
             out("activity ${a.market.name} pos=${a.positions}/${a.maxPositions} buySig=${a.buySignals} best=${a.bestSymbol}:${a.bestScore} bought=${a.boughtNow} status=${a.status} details=${a.details.size}")
@@ -245,7 +260,7 @@ fun runSelfTest(outDir: File): Int {
         shot("12-market-trend", 760, 2100) {
             val s by controller.state.collectAsState()
             androidx.compose.foundation.layout.Column {
-                listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).forEach { k ->
+                listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.METAL).forEach { k ->
                     com.saeidkazemi.trader.ui.components.MarketTrendsCard(s, androidx.compose.ui.Modifier.padding(bottom = 10.dp), only = k)
                 }
             }

@@ -19,6 +19,7 @@ class MarketDataService {
     private val goldSource = GoldSource()
     private val erSource = ErSource()
     private val iranSource = IranStockSource()
+    private val rialSource = NobitexRialSource()
     val insights = InsightSource()
 
     @Volatile
@@ -118,7 +119,10 @@ class MarketDataService {
             } else {
                 notes.add("داده بورس تهران (TSETMC) در دسترس نبود؛ ۱۰ نماد شاخص با قیمت شبیه‌سازی‌شده (با برچسب) نمایش داده می‌شود و روی آن‌ها معامله خودکار انجام نمی‌شود.")
             }
-            scan.assets
+            if (scan.goldFunds.isNotEmpty()) {
+                notes.add("صندوق‌های طلای بورسی: " + scan.goldFunds.size + " صندوق پرمعامله وارد تحلیل شد.")
+            }
+            scan.assets + scan.goldFunds
         } catch (e: Exception) {
             notes.add("داده بورس تهران در دسترس نیست.")
             emptyList()
@@ -175,6 +179,12 @@ class MarketDataService {
             notes.add("قیمت جهانی طلا در دسترس نیست.")
         }
 
+        try {
+            list.addAll(rialSource.assets())
+        } catch (e: Exception) {
+            notes.add("قیمت دلار (تتر) و طلای PAXG از نوبیتکس در دسترس نیست.")
+        }
+
         list.addAll(iranAssets)
 
         lastAssets = list
@@ -197,7 +207,12 @@ class MarketDataService {
                 MarketKind.CRYPTO -> if (asset.isDisplayOnly) emptyList() else cryptoSource.history(asset.id, asset.symbol)
                 MarketKind.FX -> fxSource.history(asset.id.removePrefix("fx:"), 90)
                 MarketKind.IR_STOCK -> iranSource.history(asset)
-                MarketKind.METAL -> emptyList()
+                MarketKind.METAL -> when {
+                    asset.isDisplayOnly || asset.isSimulated -> emptyList()
+                    asset.id.startsWith("nbx:") -> rialSource.history(asset)
+                    asset.id.startsWith("ir:") -> iranSource.history(asset)
+                    else -> emptyList()
+                }
             }
         } catch (e: Exception) {
             historyErrors[asset.id] = e.message ?: e.toString()

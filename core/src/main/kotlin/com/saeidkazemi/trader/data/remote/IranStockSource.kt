@@ -52,6 +52,15 @@ class IranStockSource {
     ) {
         val isStock: Boolean get() = isin.startsWith("IRO1") || isin.startsWith("IRO3")
 
+        /** صندوق طلای بورسی (ETF کالایی مبتنی بر گواهی سکه/شمش؛ نماد IRT…). */
+        val isGoldFund: Boolean
+            get() {
+                if (!isin.startsWith("IRT")) return false
+                val n = normalize(name)
+                val sym = normalize(symbol)
+                return n.contains("طلا") || n.contains("سکه") || sym in GOLD_FUND_SYMBOLS
+            }
+
         private fun inRange(p: Double): Boolean =
             p > 0 && (minAllowed <= 0 || p >= minAllowed) && (maxAllowed <= 0 || p <= maxAllowed)
 
@@ -134,12 +143,23 @@ class IranStockSource {
         val stocks: Int,
         val liquid: Int,
         val buyQueues: Int,
-        val sellQueues: Int
+        val sellQueues: Int,
+        /** صندوق‌های طلای بورسی (بازار «طلا و دلار»). */
+        val goldFunds: List<Asset> = emptyList()
     )
 
     companion object {
         /** حداقل ارزش معاملات روزانه برای ورود به تحلیل: ۱۰ میلیارد ریال (۱ میلیارد تومان). */
         const val MIN_VALUE_IRR = 10_000_000_000.0
+
+        /** حداکثر تعداد صندوق طلای وارد تحلیل (پرمعامله‌ترین‌ها). */
+        const val MAX_GOLD_FUNDS = 8
+
+        /** نمادهای شناخته‌شده صندوق‌های طلا (برای وقتی که نام صندوق کلمه «طلا» ندارد). */
+        val GOLD_FUND_SYMBOLS = setOf(
+            "عیار", "طلا", "زر", "گوهر", "کهربا", "مثقال", "نفیس", "آلتون", "جواهر", "ناب", "تابش",
+            "زرفام", "قیراط", "درخشان", "گنج", "لیان", "زروان"
+        )
 
         private const val API = "https://cdn.tsetmc.com/api/"
 
@@ -482,7 +502,32 @@ class IranStockSource {
                 askPrice = q.validAsk
             )
         }
+        val goldFunds = all.values
+            .filter { it.isGoldFund && it.price > 0 && (it.valueIrr >= MIN_VALUE_IRR || ("ir:" + it.insCode) in mustInclude) }
+            .sortedByDescending { it.valueIrr }
+            .take(MAX_GOLD_FUNDS)
+            .mapIndexed { idx, q ->
+                Asset(
+                    id = "ir:" + q.insCode,
+                    symbol = q.symbol,
+                    name = q.name,
+                    market = MarketKind.METAL,
+                    baseCurrency = "IRR",
+                    price = q.price,
+                    changePct24h = q.changePct,
+                    updatedAt = now,
+                    isSimulated = false,
+                    rank = idx + 1,
+                    buyQueue = q.buyQueue,
+                    sellQueue = q.sellQueue,
+                    tradeValue = q.valueIrr,
+                    farabourse = q.isin.startsWith("IRT3"),
+                    bidPrice = q.validBid,
+                    askPrice = q.validAsk
+                )
+            }
         return ScanResult(
+            goldFunds = goldFunds,
             assets = assets,
             live = true,
             scanned = all.size,

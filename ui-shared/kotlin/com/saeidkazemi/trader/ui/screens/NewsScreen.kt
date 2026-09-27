@@ -123,6 +123,11 @@ fun NewsScreen(
                     label = { Text("کریپتو", fontSize = 11.sp) }
                 )
                 FilterChip(
+                    selected = filter == MarketKind.METAL,
+                    onClick = { filter = MarketKind.METAL },
+                    label = { Text("طلا و دلار", fontSize = 11.sp) }
+                )
+                FilterChip(
                     selected = filter == MarketKind.FX,
                     onClick = { filter = MarketKind.FX },
                     label = { Text("ارز", fontSize = 11.sp) }

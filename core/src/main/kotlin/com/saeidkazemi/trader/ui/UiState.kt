@@ -113,7 +113,7 @@ data class UiState(
     fun heldAssetIds(): Set<String> = account.positions.map { it.assetId }.toSet()
 
     /** سرمایه، نقد، موقعیت‌ها و بازده هر بازار به‌صورت جداگانه. */
-    fun sleeves(): List<SleeveStat> = listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).map { m ->
+    fun sleeves(): List<SleeveStat> = MarketKind.TRADED.map { m ->
         val pos = account.positions.filter { it.market == m }
         SleeveStat(
             market = m,

@@ -315,13 +315,15 @@ class TradeEngine(
         return when (m) {
             MarketKind.CRYPTO -> asset?.let { market.insights.cachedHalfSpread(it.symbol) } ?: (Fees.DEFAULT_SPREAD_CRYPTO / 2)
             MarketKind.IR_STOCK -> asset?.let { Fees.halfSpreadOf(it.bidPrice, it.askPrice) } ?: (Fees.DEFAULT_SPREAD_IR / 2)
-            else -> 0.0
+            MarketKind.METAL -> asset?.let { Fees.halfSpreadOf(it.bidPrice, it.askPrice) } ?: (Fees.DEFAULT_SPREAD_CRYPTO / 2)
+            MarketKind.FX -> 0.0
         }
     }
 
     /** دلیل ممنوعیت معامله سهام در این لحظه (بسته بودن بازار یا صف)، یا null اگر مجاز است. */
     private fun irBlock(asset: Asset, buy: Boolean): String? {
-        if (asset.market != MarketKind.IR_STOCK) return null
+        // سهام و صندوق‌های طلای بورسی (هر دو در TSETMC با شناسه ir:)
+        if (asset.market != MarketKind.IR_STOCK && !asset.id.startsWith("ir:")) return null
         if (!IranMarket.isOpen()) return "بازار بورس بسته است (شنبه تا چهارشنبه ۹:۰۰ تا ۱۲:۳۰)"
         if (buy && asset.buyQueue) return "نماد " + asset.symbol + " در صف خرید است"
         if (!buy && asset.sellQueue) return "نماد " + asset.symbol + " در صف فروش است"
@@ -359,6 +361,7 @@ class TradeEngine(
             ?: when {
                 assetId.startsWith("fx:") -> MarketKind.FX
                 assetId.startsWith("ir:") -> MarketKind.IR_STOCK
+                assetId.startsWith("nbx:") -> MarketKind.METAL
                 else -> MarketKind.CRYPTO
             }
 
@@ -375,7 +378,7 @@ class TradeEngine(
     fun marketTrends(): List<com.saeidkazemi.trader.analysis.MarketTrendReport> {
         val all = market.cachedAssets()
         val settings = store.loadSettings()
-        return listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX).mapNotNull { m ->
+        return MarketKind.TRADED.mapNotNull { m ->
             try {
                 val list = all.filter { it.market == m && !it.isDisplayOnly }
                 val live = list.filter { !it.isSimulated }
@@ -427,7 +430,28 @@ class TradeEngine(
                 f.add("شاخص بالا رفتن یعنی ضعیف شدن دلار در برابر این ارزها (و برعکس)")
                 f.add("نرخ دلار بازار آزاد: " + Format.num(market.usdIrr(settings), 0) + " ریال" + (if (market.rateIsFallback()) " (پشتیبان)" else ""))
             }
-            MarketKind.METAL -> {}
+            MarketKind.METAL -> {
+                val all = market.cachedAssets()
+                val usdt = all.firstOrNull { it.id == "nbx:usdt" }
+                val paxg = all.firstOrNull { it.id == "nbx:paxg" }
+                val xau = all.firstOrNull { it.id == "metal:XAU" }
+                usdt?.let { a ->
+                    f.add("دلار (تتر نوبیتکس): " + Format.num(a.price / 10, 0) + " تومان" +
+                        (a.changePct24h?.let { " • ۲۴ساعت " + Format.pct(it) } ?: ""))
+                }
+                xau?.let { f.add("انس جهانی طلا: " + Format.num(it.price, 0) + " دلار") }
+                if (paxg != null && xau != null && xau.price > 0) {
+                    val implied = xau.price * market.usdIrr(settings)
+                    if (implied > 0) {
+                        val prem = (paxg.price / implied - 1) * 100
+                        f.add("اختلاف طلای PAXG با انس جهانی × دلار: " + Format.pct(prem) +
+                            (if (kotlin.math.abs(prem) > 3) " (حباب/کسری قابل‌توجه)" else ""))
+                    }
+                }
+                val funds = all.count { it.market == MarketKind.METAL && it.id.startsWith("ir:") && !it.isSimulated }
+                f.add(if (funds > 0) "صندوق‌های طلای بورسی در تحلیل: " + funds + " (فقط ساعت بازار بورس معامله می‌شوند)"
+                    else "صندوق‌های طلای بورسی: داده TSETMC در دسترس نیست (فقط تتر و PAXG)")
+            }
         }
         return f
     }
@@ -604,12 +628,44 @@ class TradeEngine(
         return out
     }
 
+    /**
+     * نسخه ۱.۶: بازار «طلا و دلار» اضافه شد. برای کاربران قبلی سهم فارکس (که فقط شبیه‌سازی بود) به طلا و دلار
+     * منتقل می‌شود؛ حساب از نو ساخته نمی‌شود و سود/زیان قبلی حفظ می‌شود.
+     */
+    private fun migrateMetal(notes: MutableList<String>) {
+        val s = store.loadSettings()
+        if (!s.allocations.containsKey(MarketKind.METAL.name)) {
+            val fxPct = s.allocationPct(MarketKind.FX)
+            store.saveSettings(
+                s.copy(
+                    allocations = s.allocations + (MarketKind.METAL.name to fxPct) + (MarketKind.FX.name to 0.0),
+                    marketRisk = s.marketRisk + (MarketKind.METAL.name to (s.marketRisk[MarketKind.METAL.name] ?: "MED"))
+                )
+            )
+            notes.add("بازار جدید «طلا و دلار» فعال شد و سهم " + Format.num(fxPct, 0) + "٪ فارکس به آن رسید (تتر، طلای PAXG و صندوق‌های طلای بورسی).")
+        }
+        // نقد باقی‌مانده فارکس (وقتی سهمش صفر است و موقعیت بازی ندارد) به طلا و دلار منتقل می‌شود.
+        val cur = store.loadSettings()
+        if (cur.allocationPct(MarketKind.FX) <= 0.0 && cur.allocationPct(MarketKind.METAL) > 0.0 &&
+            (broker.account().cashByMarket[MarketKind.FX.name] ?: 0.0) > 0.01
+        ) {
+            val moved = broker.moveSleeve(MarketKind.FX, MarketKind.METAL)
+            if (moved != null && moved > 0) {
+                notes.add("نقد بخش فارکس ($" + Format.money(moved) + ") به بخش طلا و دلار منتقل شد؛ حساب از نو ساخته نشد و سود قبلی حفظ شد.")
+            }
+        }
+    }
+
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
         ensureJournal()
-        val settings = store.loadSettings()
         val buys = mutableListOf<String>()
         val sells = mutableListOf<String>()
         val notes = mutableListOf<String>()
+        try {
+            migrateMetal(notes)
+        } catch (_: Exception) {
+        }
+        val settings = store.loadSettings()
 
         val heldIds = broker.account().positions.map { it.assetId }.toSet()
         val result = try {
@@ -1037,7 +1093,7 @@ class TradeEngine(
     ) {
         if (!settings.realTrading) return
         val sym = asset.nobitexSymbol
-        if (asset.market != MarketKind.CRYPTO || sym == null) {
+        if ((asset.market != MarketKind.CRYPTO && !asset.id.startsWith("nbx:")) || sym == null) {
             notes.add("معامله واقعی فقط برای ارزهای متصل به نوبیتکس فعال است؛ " + asset.symbol + " فقط در دفتر دمو ثبت شد.")
             return
         }
@@ -1062,7 +1118,7 @@ class TradeEngine(
     ) {
         if (!settings.realTrading) return
         val sym = asset.nobitexSymbol
-        if (asset.market != MarketKind.CRYPTO || sym == null) {
+        if ((asset.market != MarketKind.CRYPTO && !asset.id.startsWith("nbx:")) || sym == null) {
             notes.add("فروش واقعی فقط برای ارزهای متصل به نوبیتکس فعال است؛ " + asset.symbol + " فقط در دفتر دمو ثبت شد.")
             return
         }

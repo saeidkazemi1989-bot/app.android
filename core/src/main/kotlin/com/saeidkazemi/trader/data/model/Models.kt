@@ -5,7 +5,13 @@ enum class MarketKind(val faTitle: String) {
     CRYPTO("ارز دیجیتال"),
     IR_STOCK("بورس تهران"),
     FX("ارز خارجی"),
-    METAL("فلزات گرانبها")
+    /** طلا و دلار: تتر و PAXG نوبیتکس (تومانی) + صندوق‌های طلای بورسی. */
+    METAL("طلا و دلار");
+
+    companion object {
+        /** بازارهایی که سرمایه جداگانه دارند و معامله می‌شوند (به ترتیب نمایش). */
+        val TRADED: List<MarketKind> = listOf(CRYPTO, IR_STOCK, METAL, FX)
+    }
 }
 
 /** یک دارایی با آخرین قیمت. قیمت‌ها به ارز پایه خود دارایی هستند (معمولاً USD یا IRR). */
@@ -168,9 +174,9 @@ data class AppSettings(
     /** تحلیل تخصصی (جریان پول حقیقی/حقوقی، حجم، P/E، ترس و طمع، دفتر سفارش، وضعیت کل بازار). */
     val proAnalysis: Boolean = true,
     /** درصد سرمایه هر بازار (کلید: نام MarketKind). جمع باید ۱۰۰ باشد. */
-    val allocations: Map<String, Double> = mapOf("CRYPTO" to 50.0, "IR_STOCK" to 40.0, "FX" to 10.0),
+    val allocations: Map<String, Double> = mapOf("CRYPTO" to 50.0, "IR_STOCK" to 40.0, "METAL" to 10.0, "FX" to 0.0),
     /** سطح ریسک جداگانه هر بازار (LOW / MED / HIGH). */
-    val marketRisk: Map<String, String> = mapOf("CRYPTO" to "MED", "IR_STOCK" to "MED", "FX" to "LOW"),
+    val marketRisk: Map<String, String> = mapOf("CRYPTO" to "MED", "IR_STOCK" to "MED", "METAL" to "MED", "FX" to "LOW"),
     /** هشدار صوتی هنگام شروع و پایان هر معامله. */
     val soundAlerts: Boolean = true,
     /** لرزش گوشی پس از پایان معامله. */

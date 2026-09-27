@@ -25,6 +25,12 @@ object Fees {
     /** فروش سهام: حدود ۰٫۳۸٪ کارمزد ارکان + ۰٫۵٪ مالیات مقطوع نقل‌وانتقال (ماده ۱۴۳ ق.م.م). */
     const val IR_SELL = 0.0088
 
+    /**
+     * صندوق‌های طلای بورسی (ETF کالایی): کارمزد هر طرف ۰٫۱۲۵٪ و بدون مالیات فروش
+     * (کارمزد ETFها ۲۵٪ سقف کارمزد معمول اوراق؛ مصوبه سازمان بورس).
+     */
+    const val GOLD_FUND_FEE = 0.00125
+
     /** پله‌های کارمزد نوبیتکس؛ ربات سفارش «بازار» در بازار تومانی ثبت می‌کند، پس کارمزد «تیکر تومانی» اعمال می‌شود. */
     data class Tier(val name: String, val volume: String, val takerIrt: Double, val takerUsdt: Double)
 
@@ -48,16 +54,21 @@ object Fees {
     fun tier(settings: AppSettings): Tier = NOBITEX_TIERS[settings.nobitexFeeTier.coerceIn(0, NOBITEX_TIERS.size - 1)]
 
     /** کارمزد یک طرف معامله (کسر از ارزش معامله، مثلاً ۰٫۰۰۲۵ = ۰٫۲۵٪). */
-    fun commission(market: MarketKind, buy: Boolean, settings: AppSettings, farabourse: Boolean = false): Double =
+    fun commission(
+        market: MarketKind, buy: Boolean, settings: AppSettings,
+        farabourse: Boolean = false, goldFund: Boolean = false
+    ): Double =
         when (market) {
             MarketKind.IR_STOCK -> if (!buy) IR_SELL else if (farabourse) IR_FARA_BUY else IR_BOURSE_BUY
             MarketKind.CRYPTO -> tier(settings).takerIrt
-            MarketKind.FX, MarketKind.METAL -> settings.feePct
+            // طلا و دلار: صندوق طلای بورسی یا بازار تومانی نوبیتکس (تتر/PAXG)
+            MarketKind.METAL -> if (goldFund) GOLD_FUND_FEE else tier(settings).takerIrt
+            MarketKind.FX -> settings.feePct
         }
 
     fun commission(asset: Asset?, kind: MarketKind?, buy: Boolean, settings: AppSettings): Double {
         val m = asset?.market ?: kind ?: MarketKind.CRYPTO
-        return commission(m, buy, settings, asset?.farabourse == true)
+        return commission(m, buy, settings, asset?.farabourse == true, asset?.id?.startsWith("ir:") == true)
     }
 
     /**
@@ -83,6 +94,11 @@ object Fees {
             Line(
                 MarketKind.IR_STOCK, IR_BOURSE_BUY * 100, IR_SELL * 100,
                 "مصوبه سازمان بورس: خرید ۰٫۳۷۱۲٪ (فرابورس ۰٫۳۶۳۲٪)، فروش ۰٫۸۸٪ شامل ۰٫۵٪ مالیات + اسپرد زنده سرخط سفارش‌ها",
+                true
+            ),
+            Line(
+                MarketKind.METAL, t.takerIrt * 100, t.takerIrt * 100,
+                "تتر و طلای PAXG: نوبیتکس بازار تومانی (پله «" + t.name + "») • صندوق‌های طلای بورسی: ۰٫۱۲۵٪ هر طرف بدون مالیات • + اسپرد زنده",
                 true
             ),
             Line(

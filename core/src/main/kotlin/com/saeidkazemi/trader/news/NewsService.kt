@@ -111,7 +111,12 @@ class NewsService(
                 )
             }
 
-            MarketKind.METAL -> collectGoogle("\"gold price\" OR \"gold prices\" when:7d", false, items, ok, failed)
+            MarketKind.METAL -> if (asset.id == "nbx:usdt") {
+                collectGoogle("\"قیمت دلار\" OR \"دلار آزاد\" OR \"نرخ دلار\" when:7d", true, items, ok, failed)
+            } else {
+                collectGoogle("\"قیمت طلا\" OR \"صندوق طلا\" OR \"انس طلا\" when:7d", true, items, ok, failed)
+                collectGoogle("\"gold price\" OR \"gold prices\" when:7d", false, items, ok, failed)
+            }
         }
 
         val dedup = items

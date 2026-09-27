@@ -47,8 +47,8 @@ fun MarketsScreen(
         "همه" to null,
         "ارز دیجیتال" to MarketKind.CRYPTO,
         "بورس تهران" to MarketKind.IR_STOCK,
-        "ارز خارجی" to MarketKind.FX,
-        "طلا" to MarketKind.METAL
+        "طلا و دلار" to MarketKind.METAL,
+        "ارز خارجی" to MarketKind.FX
     )
     var selectedTab by remember { mutableStateOf(0) }
     var query by remember { mutableStateOf("") }
@@ -87,7 +87,7 @@ fun MarketsScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (kind != null && kind != MarketKind.METAL && query.isBlank()) {
+                if (kind != null && query.isBlank()) {
                     item(key = "trend_" + kind.name) {
                         com.saeidkazemi.trader.ui.components.MarketTrendsCard(state = state, only = kind)
                     }

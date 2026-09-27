@@ -60,7 +60,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
     }
     var allocInputs by remember(state.settings.allocations) {
         mutableStateOf(
-            listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
+            MarketKind.TRADED
                 .associateWith { Format.raw(state.settings.allocationPct(it), 0) }
         )
     }
@@ -106,13 +106,14 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             SettingsCard("تقسیم سرمایه بین بازارها") {
                 Text(
                     "هر بازار صندوق جداگانه دارد و فقط با سهم خودش معامله می‌کند؛ سود و زیان هر بازار هم جدا حساب می‌شود. " +
-                        "مثلاً ۵۰٪ ارز دیجیتال، ۴۰٪ بورس تهران و ۱۰٪ ارز خارجی. صفر یعنی آن بازار معامله نمی‌شود. " +
+                        "مثلاً ۵۰٪ ارز دیجیتال، ۴۰٪ بورس تهران و ۱۰٪ طلا و دلار (تتر، طلای PAXG، صندوق‌های طلا). " +
+                        "ارز خارجی (فارکس) فقط شبیه‌سازی است و پیش‌فرض صفر است. صفر یعنی آن بازار معامله نمی‌شود. " +
                         "با ذخیره، حساب دمو با تقسیم جدید از نو ساخته می‌شود.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
-                val markets = listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.FX)
+                val markets = MarketKind.TRADED
                 markets.forEach { m ->
                     val cur = allocInputs[m] ?: ""
                     Row(
@@ -150,7 +151,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                         "تا " + plan.maxPositions + " موقعیت، هر کدام " + Format.num(plan.positionPct * 100, 0) + "٪ این بخش، " +
                             "حد ضرر بر اساس نوسان " + Format.num(plan.minStopPct * 100, 1) + "–" + Format.num(plan.maxStopPct * 100, 1) + "٪، " +
                             "حد ضرر متحرک " + Format.num(plan.trailPct * 100, 1) + "٪ زیر قله" +
-                            (if (m == MarketKind.IR_STOCK) "؛ فقط در ساعت بازار و بدون صف" else if (m == MarketKind.CRYPTO) "؛ ۲۴ ساعته" else ""),
+                            (if (m == MarketKind.IR_STOCK) "؛ فقط در ساعت بازار و بدون صف" else if (m == MarketKind.CRYPTO) "؛ ۲۴ ساعته" else if (m == MarketKind.METAL) "؛ تتر و PAXG ۲۴ ساعته، صندوق طلا در ساعت بورس" else if (m == MarketKind.FX) "؛ فقط شبیه‌سازی (نرخ مرجع)" else ""),
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
@@ -169,6 +170,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                         vm.setAllocationsAndReset(
                             allocInputs[MarketKind.CRYPTO]?.toDoubleOrNull() ?: -1.0,
                             allocInputs[MarketKind.IR_STOCK]?.toDoubleOrNull() ?: -1.0,
+                            allocInputs[MarketKind.METAL]?.toDoubleOrNull() ?: -1.0,
                             allocInputs[MarketKind.FX]?.toDoubleOrNull() ?: -1.0
                         )
                     },
