@@ -966,7 +966,7 @@ class TradeEngine(
                 holdExpired(pos, settings) -> "پایان مهلت نگهداری " + planFor(settings, pos.market).maxHoldDays + " روزه (طبق بک‌تست)"
                 sig != null && sig.newsBlocked -> "خروج به‌خاطر خبر منفی مهم"
                 sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
-                sig != null && sig.score <= settings.sellThreshold -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
+                sig != null && sig.score <= settings.sellThreshold && planFor(settings, pos.market).entryMode == 0 -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
                 else -> null
             }
             if (reason != null) {
@@ -1013,8 +1013,14 @@ class TradeEngine(
                         .mapNotNull { a -> histories[a.id]?.map { it.price }?.takeIf { it.size >= 20 } }
                     if (hs.size < 3) null else hs.count { v -> v.last() > v.takeLast(20).average() }.toDouble() / hs.size
                 } else null
+                if (plan.entryMode == 1) notes.add(m.faTitle + ": حالت ورود بک‌تست = خرید در اصلاح (RSI زیر " + Format.trim(plan.rsiMax, 0) + ")" +
+                    (if (plan.entryFilter != 0) " با فیلتر " + Backtest.filterLabel(plan.entryFilter) else "") + ".")
                 for (sig in signals) {
-                    if (sig.market != m || sig.action != Action.BUY) continue
+                    if (sig.market != m) continue
+                    val entryOk = if (plan.entryMode == 1) {
+                        (sig.metrics.rsi ?: 100.0) < plan.rsiMax && !sig.newsBlocked && !sig.proBlocked
+                    } else sig.action == Action.BUY
+                    if (!entryOk) continue
                     val acc = broker.account()
                     if (acc.positions.count { it.market == m } >= plan.maxPositions) {
                         stopReason = "سقف " + plan.maxPositions + " موقعیت همزمان این بازار پر است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
@@ -1041,7 +1047,7 @@ class TradeEngine(
                             continue
                         }
                     }
-                    if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) {
+                    if (plan.entryMode == 0 && guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) {
                         skip("محافظ نرخ برد: امتیاز کمتر از " + (th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD))
                         continue
                     }
@@ -1059,7 +1065,7 @@ class TradeEngine(
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
                     val rrPart = plan.plannedRR(sig.metrics.volatility).takeIf { it > 0 }?.let { "، ریسک به ریوارد ۱:" + Format.trim(it, 1) } ?: ""
-                    val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + ")"
+                    val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + ")"
                     val stopPct = plan.stopFor(sig.metrics.volatility)
                     announce("BUY", asset, amount, reason)
                     val hs = halfSpread(asset, null)

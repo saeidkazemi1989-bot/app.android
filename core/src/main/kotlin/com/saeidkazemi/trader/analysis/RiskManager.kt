@@ -39,6 +39,9 @@ class RiskManager {
         val maxHoldDays: Int = 0,
         /** فیلتر ورود بک‌تست (بیت ۱: بالای میانگین ۱۰۰ روزه، بیت ۲: پهنای بازار ≥ ۵۰٪). */
         val entryFilter: Int = 0,
+        /** نوع ورود بک‌تست: ۰ مومنتوم، ۱ خرید در اصلاح (RSI زیر [rsiMax]). */
+        val entryMode: Int = 0,
+        val rsiMax: Double = 0.0,
         /** پارامترها از بک‌تست آمده‌اند. */
         val tuned: Boolean = false
     ) {
