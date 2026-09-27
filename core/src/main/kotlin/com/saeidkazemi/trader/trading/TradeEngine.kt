@@ -337,11 +337,11 @@ class TradeEngine(
 
     @Volatile
     var lastSignals: List<Signal> = emptyList()
+        private set
 
     /** وضعیت هر بازار در آخرین دور (چرا خرید/فروش شد یا نشد). */
     @Volatile
     var lastActivity: List<MarketActivity> = emptyList()
-        private set
         private set
 
     /** مسیر قیمت موقعیت‌های باز از لحظه خرید. */
