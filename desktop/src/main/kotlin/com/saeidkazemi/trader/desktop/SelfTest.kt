@@ -125,6 +125,9 @@ fun runSelfTest(outDir: File): Int {
             val j0 = container.tradeEngine.journal.all().firstOrNull()
             out("fees halfSpread% " + sp + " | journal buySpread=" + j0?.buySpreadPct?.let { "%.3f".format(it) } + " feePct=" + j0?.let { if (it.amountUsd > 0) "%.3f".format(it.buyFeeUsd / it.amountUsd * 100) else null })
         }
+        container.tradeEngine.lastActivity.forEach { a ->
+            out("activity ${a.market.name} pos=${a.positions}/${a.maxPositions} buySig=${a.buySignals} best=${a.bestSymbol}:${a.bestScore} bought=${a.boughtNow} status=${a.status} details=${a.details.size}")
+        }
         container.tradeEngine.marketTrends().forEach { r ->
             out("trend ${r.market.name} label=${r.trendLabel} score=${r.trendScore} c1=${r.change1d?.let { "%.2f".format(it) }} c7=${r.change7d?.let { "%.2f".format(it) }} c30=${r.change30d?.let { "%.2f".format(it) }} " +
                 "breadth=${r.breadthAboveSma20?.let { "%.2f".format(it) }} n=${r.constituents} pts=${r.index.size} fc=${r.forecast?.trendLabel} facts=${r.facts.size} sim=${r.simulated}")
@@ -234,6 +237,10 @@ fun runSelfTest(outDir: File): Int {
                 val s by controller.state.collectAsState()
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
             }
+        }
+        shot("13-activity", 760, 1300) {
+            val s by controller.state.collectAsState()
+            com.saeidkazemi.trader.ui.components.BotActivityCard(s)
         }
         shot("12-market-trend", 760, 2100) {
             val s by controller.state.collectAsState()

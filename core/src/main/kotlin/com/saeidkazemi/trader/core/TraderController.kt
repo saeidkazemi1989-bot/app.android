@@ -129,7 +129,8 @@ class TraderController(
                 outlooks = container.tradeEngine.outlooks(),
                 journal = journal,
                 perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings),
-                marketTrends = trends
+                marketTrends = trends,
+                activity = container.tradeEngine.lastActivity
             )
         }
     }

@@ -208,6 +208,86 @@ class TradeEngine(
         return market.usdPriceOf(asset, settings)
     }
 
+    private fun buildActivity(
+        m: MarketKind,
+        settings: AppSettings,
+        maxPositions: Int,
+        minTradeUsd: Double,
+        th: Int,
+        reserve: Double,
+        signals: List<Signal>,
+        priceMap: Map<String, Double>,
+        bought: Int,
+        soldSymbols: List<String>,
+        skipped: Map<String, Int>,
+        stopReason: String?
+    ): MarketActivity {
+        val acc = broker.account()
+        val mine = signals.filter { it.market == m }
+        val buySigs = mine.filter { it.action == Action.BUY }
+        val best = mine.filter { s -> acc.positions.none { it.assetId == s.assetId } }.maxByOrNull { it.score }
+        val held = acc.positions.filter { it.market == m }
+        val closedHere = journal.all().filter { it.market == m && !it.isOpen }.map { it.symbol }.toSet()
+        val sold = soldSymbols.count { it in closedHere }
+        val blockedHigh = mine.count { it.score >= th && it.action != Action.BUY }
+        val status = when {
+            bought > 0 -> "این دور " + bought + " خرید انجام شد"
+            m == MarketKind.IR_STOCK && !IranMarket.isOpen() -> "بازار بورس بسته است (شنبه تا چهارشنبه ۹:۰۰ تا ۱۲:۳۰)؛ خرید و فروش سهام فقط در ساعت بازار"
+            stopReason != null -> stopReason
+            mine.isEmpty() -> "هنوز داده کافی برای تحلیل این بازار نیست"
+            buySigs.isEmpty() -> "هیچ دارایی به آستانه خرید (" + th + ") نرسید" +
+                (best?.let { "؛ بهترین: " + it.symbol + " با امتیاز " + it.score } ?: "")
+            skipped.isNotEmpty() -> "همه " + buySigs.size + " کاندید خرید رد شدند: " +
+                skipped.entries.sortedByDescending { it.value }.take(2).joinToString("، ") { it.key + " (" + it.value + ")" }
+            else -> "کاندید مناسبی برای خرید نبود"
+        }
+        val details = ArrayList<String>()
+        if (blockedHigh > 0) details.add(blockedHigh.toString() + " دارایی امتیاز کافی داشتند ولی به‌خاطر خبر منفی مهم یا شرایط تخصصی خطرناک خریده نشدند")
+        if (skipped.isNotEmpty() && bought > 0) {
+            details.add("رد شده‌ها: " + skipped.entries.sortedByDescending { it.value }.take(3).joinToString("، ") { it.key + " (" + it.value + ")" })
+        }
+        val free = (acc.cashByMarket[m.name] ?: 0.0)
+        details.add(
+            "موقعیت‌ها " + held.size + " از " + maxPositions + " • نقد آزاد $" + Format.num(free) +
+                " (ذخیره $" + Format.num(reserve) + ") • آستانه خرید " + th
+        )
+        // فاصله هر موقعیت تا فروش
+        for (p in held.take(6)) {
+            val cur = priceMap[p.assetId] ?: continue
+            if (cur <= 0 || p.avgBuyUsd <= 0) continue
+            val pnl = (cur / p.avgBuyUsd - 1) * 100
+            val toStop = (p.stopLossUsd / cur - 1) * 100
+            val toTp = (p.takeProfitUsd / cur - 1) * 100
+            val sig = mine.firstOrNull { it.assetId == p.assetId }
+            val stopTxt = if (toStop < 0) "اگر " + Format.num(-toStop, 1) + "٪ دیگر افت کند" else "زیر حد ضرر است و در اولین فرصت ممکن"
+            val tpTxt = if (toTp > 0) "یا اگر " + Format.num(toTp, 1) + "٪ دیگر رشد کند" else "به حد سود رسیده"
+            details.add(
+                p.symbol + ": الان " + Format.pct(pnl) + " • فروش " + stopTxt +
+                    (if (p.profitLockedPct > 0) " (قفل سود " + Format.num(p.profitLockedPct, 0) + "٪)" else "") +
+                    " " + tpTxt +
+                    (sig?.let { " یا اگر امتیازش از " + it.score + " به " + settings.sellThreshold + " برسد" } ?: "")
+            )
+        }
+        val lastTrade = journal.all().filter { it.market == m }.maxOfOrNull { maxOf(it.openedAt, it.closedAt ?: 0L) }
+        return MarketActivity(
+            market = m,
+            ts = System.currentTimeMillis(),
+            positions = held.size,
+            maxPositions = maxPositions,
+            freeCashUsd = free,
+            minTradeUsd = minTradeUsd,
+            threshold = th,
+            buySignals = buySigs.size,
+            bestSymbol = best?.symbol,
+            bestScore = best?.score,
+            boughtNow = bought,
+            soldNow = sold,
+            status = status,
+            details = details,
+            lastTradeAt = lastTrade
+        )
+    }
+
     /** موقعیت‌های ریالی قدیمی: نرخ دلار لحظه خرید از ژورنال بازسازی و ثابت می‌شود. */
     private fun migrateFxLocks(settings: AppSettings, notes: MutableList<String>) {
         for (pos in broker.account().positions) {
@@ -257,6 +337,11 @@ class TradeEngine(
 
     @Volatile
     var lastSignals: List<Signal> = emptyList()
+
+    /** وضعیت هر بازار در آخرین دور (چرا خرید/فروش شد یا نشد). */
+    @Volatile
+    var lastActivity: List<MarketActivity> = emptyList()
+        private set
         private set
 
     /** مسیر قیمت موقعیت‌های باز از لحظه خرید. */
@@ -741,10 +826,15 @@ class TradeEngine(
         }
 
         // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
+        val activity = ArrayList<MarketActivity>()
         if (settings.autoTrade) {
             for (m in riskManager.tradableMarkets) {
                 if (settings.allocationPct(m) <= 0.0) continue
                 val plan = planFor(settings, m)
+                val skipped = LinkedHashMap<String, Int>()
+                fun skip(r: String) { skipped[r] = (skipped[r] ?: 0) + 1 }
+                var stopReason: String? = null
+                var boughtHere = 0
                 val acc0 = broker.account()
                 val equity = sleeveEquity(acc0, m, priceMap)
                 val reserve = equity * plan.cashReservePct
@@ -755,24 +845,38 @@ class TradeEngine(
                 for (sig in signals) {
                     if (sig.market != m || sig.action != Action.BUY) continue
                     val acc = broker.account()
-                    if (acc.positions.count { it.market == m } >= plan.maxPositions) break
-                    if (acc.positions.any { it.assetId == sig.assetId }) continue
-                    if (sells.contains(sig.symbol)) continue
+                    if (acc.positions.count { it.market == m } >= plan.maxPositions) {
+                        stopReason = "سقف " + plan.maxPositions + " موقعیت همزمان این بازار پر است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
+                        break
+                    }
+                    if (acc.positions.any { it.assetId == sig.assetId }) { skip("از قبل در پرتفوی است"); continue }
+                    if (sells.contains(sig.symbol)) { skip("همین دور فروخته شد"); continue }
                     val asset = assetMap[sig.assetId] ?: continue
                     // روی داده شبیه‌سازی‌شده خودکار خرید نمی‌شود تا سود/زیان دمو واقعی بماند.
-                    if (asset.isSimulated) continue
+                    if (asset.isSimulated) { skip("داده شبیه‌سازی‌شده (منبع اصلی در دسترس نیست)"); continue }
                     // سهام: فقط در ساعت کار بازار و وقتی نماد در صف خرید نیست.
-                    if (irBlock(asset, buy = true) != null) continue
+                    val blockedWhy = irBlock(asset, buy = true)
+                    if (blockedWhy != null) {
+                        skip(if (blockedWhy.startsWith("نماد")) "در صف خرید است" else blockedWhy)
+                        continue
+                    }
                     // خرید خودکار سهمِ در صف فروش ممنوع: فروشنده‌ها روی کف قیمت صف کشیده‌اند و فروش بعدی ممکن است روزها طول بکشد.
-                    if (asset.sellQueue) continue
-                    if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) continue
-                    val usdPrice = priceMap[asset.id] ?: continue
-                    if (!usdPrice.isFinite() || usdPrice <= 0) continue
+                    if (asset.sellQueue) { skip("در صف فروش است"); continue }
+                    if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) {
+                        skip("محافظ نرخ برد: امتیاز کمتر از " + (th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD))
+                        continue
+                    }
+                    val usdPrice = priceMap[asset.id]
+                    if (usdPrice == null || !usdPrice.isFinite() || usdPrice <= 0) { skip("قیمت معتبر در دسترس نیست"); continue }
                     val budget = equity * plan.positionPct *
                         (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0)
                     val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve
                     val amount = minOf(budget, available)
-                    if (amount < plan.minTradeUsd) break
+                    if (amount < plan.minTradeUsd) {
+                        stopReason = "نقد آزاد این بازار ($" + Format.num(maxOf(0.0, available)) + " پس از ذخیره نقدی) کمتر از حداقل معامله ($" +
+                            Format.num(plan.minTradeUsd, 0) + ") است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
+                        break
+                    }
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
                     val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + ")"
@@ -792,6 +896,7 @@ class TradeEngine(
                     )
                     if (trade != null) {
                         buys.add(asset.symbol)
+                        boughtHere++
                         journalOpen(
                             asset, trade, sig, settings,
                             stopUsd = usdPrice * (1 - stopPct), tpUsd = usdPrice * (1 + plan.tpPct), trailPct = plan.trailPct,
@@ -805,9 +910,13 @@ class TradeEngine(
                         completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
                     }
                 }
+                activity.add(
+                    buildActivity(m, settings, plan.maxPositions, plan.minTradeUsd, th, reserve, signals, priceMap, boughtHere, sells, skipped, stopReason)
+                )
             }
             if (signals.isEmpty()) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")
         }
+        lastActivity = activity
 
         store.saveAccount(broker.account())
         tracker.record(broker.account().positions, priceMap)

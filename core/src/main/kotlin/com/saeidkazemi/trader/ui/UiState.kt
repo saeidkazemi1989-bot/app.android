@@ -89,7 +89,9 @@ data class UiState(
     /** پنل سودآوری: نرخ برد، ضریب سود، امید ریاضی، … */
     val perf: com.saeidkazemi.trader.analysis.PerfReport = com.saeidkazemi.trader.analysis.PerfReport(),
     /** روند کلی هر بازار. */
-    val marketTrends: List<com.saeidkazemi.trader.analysis.MarketTrendReport> = emptyList()
+    val marketTrends: List<com.saeidkazemi.trader.analysis.MarketTrendReport> = emptyList(),
+    /** وضعیت ربات در هر بازار در آخرین دور (چرا خرید/فروش کرد یا نکرد). */
+    val activity: List<com.saeidkazemi.trader.trading.MarketActivity> = emptyList()
 ) {
     val equityUsd: Double
         get() = account.cashUsd + account.positions.sumOf { p ->

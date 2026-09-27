@@ -46,7 +46,8 @@ fun DashboardScreen(
     state: UiState,
     onRefresh: () -> Unit,
     onToggleAuto: (Boolean) -> Unit,
-    onOpenAsset: (String) -> Unit
+    onOpenAsset: (String) -> Unit,
+    onBatteryFix: (() -> Unit)? = null
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -155,6 +156,13 @@ fun DashboardScreen(
                     )
                 }
             }
+
+            // ربات الان چه می‌کند؟ (آخرین بررسی و دلیل خرید/فروش نکردن در هر بازار)
+            com.saeidkazemi.trader.ui.components.BotActivityCard(
+                state = state,
+                modifier = Modifier.padding(top = 12.dp),
+                onBatteryFix = onBatteryFix
+            )
 
             // هشدارها
             if (state.notes.isNotEmpty()) {

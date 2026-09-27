@@ -123,7 +123,8 @@ fun AppRoot(
                         state = state,
                         onRefresh = controller::refresh,
                         onToggleAuto = controller::toggleAutoTrade,
-                        onOpenAsset = openAsset
+                        onOpenAsset = openAsset,
+                        onBatteryFix = controller::requestBatteryExemption
                     )
                 }
             }
