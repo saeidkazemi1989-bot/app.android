@@ -263,7 +263,7 @@ fun runSelfTest(outDir: File): Int {
             }
             fun f(s: com.saeidkazemi.trader.analysis.Backtest.Stats?): String =
                 if (s == null) "-" else "n=${s.trades} wr=${"%.1f".format(s.winRate)} rr=${"%.2f".format(s.rr)} exp=${"%.2f".format(s.expectancyPct)} pf=${"%.2f".format(s.profitFactor)} dd=${"%.1f".format(s.maxDrawdownPct)}"
-            fun pp(p: com.saeidkazemi.trader.analysis.Backtest.Params?): String =
+            fun pp(p: com.saeidkazemi.trader.analysis.Backtest.Params?): String = if (p == null) "-" else "f=${p.filter} " +
                 if (p == null) "-" else "th=${p.threshold} tp=${"%.1f".format(p.tpPct * 100)} k=${p.stopMult} st=${"%.1f".format(p.minStopPct * 100)}-${"%.1f".format(p.maxStopPct * 100)} tr=${"%.0f".format(p.trailPct * 100)} hold=${p.maxHoldDays}"
             out("bt time=${(System.currentTimeMillis() - t0) / 1000}s results=${r?.results?.size} notes=${r?.notes}")
             r?.results?.forEach { m ->

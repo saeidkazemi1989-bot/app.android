@@ -53,7 +53,7 @@ fun BacktestCard(
         Text("بک‌تست و ریسک به ریوارد", fontWeight = FontWeight.Bold, fontSize = 14.sp)
         Text(
             "ربات روزی یک بار همان امتیازدهی خودش را روی تاریخچه واقعی (تا ۲ سال) روز به روز اجرا می‌کند و " +
-                Backtest.grid(com.saeidkazemi.trader.data.model.MarketKind.CRYPTO).size + " ترکیب «آستانه خرید، حد سود، حد ضرر، حد ضرر متحرک، مهلت نگهداری» را با کارمزد و اسپرد واقعی امتحان می‌کند. " +
+                Backtest.grid(com.saeidkazemi.trader.data.model.MarketKind.CRYPTO).size + " ترکیب «آستانه خرید، حد سود، حد ضرر، حد ضرر متحرک، مهلت نگهداری، فیلتر روند و همراهی بازار» را با کارمزد و اسپرد واقعی امتحان می‌کند. " +
                 "هدف: نرخ برد حداقل " + Backtest.TARGET_WIN_RATE.toInt() + "٪ همراه با سود (نه فقط برد زیاد با زیان‌های بزرگ). " +
                 "انتخاب روی ۷۰٪ اول داده و آزمون روی ۳۰٪ آخر انجام می‌شود؛ فقط اگر در آزمون هم سودده باشد اعمال می‌شود.",
             fontSize = 11.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,

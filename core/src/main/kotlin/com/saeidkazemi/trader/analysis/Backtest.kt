@@ -35,7 +35,9 @@ object Backtest {
         val maxStopPct: Double,
         val trailPct: Double,
         /** مهلت نگهداری به روز (۰ = بدون مهلت). */
-        val maxHoldDays: Int
+        val maxHoldDays: Int,
+        /** فیلتر ورود: ۰ بدون فیلتر، ۱ قیمت بالای میانگین ۱۰۰ روزه، ۲ بیش از نیمی از بازار بالای میانگین ۲۰ روزه، ۳ هر دو. */
+        val filter: Int = 0
     ) {
         fun stopFor(volPct: Double?): Double {
             if (volPct == null || !volPct.isFinite() || volPct <= 0) return (minStopPct + maxStopPct) / 2
@@ -45,7 +47,22 @@ object Backtest {
         fun label(): String =
             "آستانه " + threshold + " • حد سود " + trim(tpPct * 100) + "٪ • حد ضرر " + trim(minStopPct * 100) + "–" + trim(maxStopPct * 100) +
                 "٪ (" + trim(stopMult) + "× نوسان)" + (if (trailPct > 0) " • متحرک " + trim(trailPct * 100) + "٪" else "") +
-                (if (maxHoldDays > 0) " • حداکثر " + maxHoldDays + " روز" else "")
+                (if (maxHoldDays > 0) " • حداکثر " + maxHoldDays + " روز" else "") +
+                (if (filter > 0) " • فیلتر: " + filterLabel(filter) else "")
+    }
+
+    fun filterLabel(f: Int): String = when (f) {
+        1 -> "روند بلندمدت (بالای میانگین ۱۰۰ روزه)"
+        2 -> "بازار همراه (بیش از ۵۰٪ دارایی‌ها صعودی)"
+        3 -> "روند بلندمدت + بازار همراه"
+        else -> "بدون فیلتر"
+    }
+
+    /** آیا شرط فیلتر ورود برقرار است؟ */
+    fun filterOk(f: Int, aboveSma100: Boolean?, breadth: Double?): Boolean {
+        val a = (f and 1) == 0 || aboveSma100 == true
+        val b = (f and 2) == 0 || (breadth != null && breadth >= 0.5)
+        return a && b
     }
 
     /** هزینه واقعی یک طرف معامله (کسر). */
@@ -59,8 +76,32 @@ object Backtest {
         val close: DoubleArray,
         val score: IntArray,
         val vol: DoubleArray,
-        val costs: Costs
-    )
+        val costs: Costs,
+        val above100: BooleanArray = BooleanArray(t.size),
+        val above20: BooleanArray = BooleanArray(t.size)
+    ) {
+        /** سهم دارایی‌های بازار بالای میانگین ۲۰ روزه در هر روز (با [attachBreadth] پر می‌شود). */
+        var breadth: DoubleArray = DoubleArray(t.size) { Double.NaN }
+    }
+
+    /** پهنای بازار روزانه: سهم سری‌هایی که آن روز بالای میانگین ۲۰ روزه خودشان بوده‌اند. */
+    fun attachBreadth(series: List<Series>) {
+        val up = HashMap<Long, Int>()
+        val all = HashMap<Long, Int>()
+        for (s in series) for (i in s.t.indices) {
+            if (i < 20) continue
+            val d = s.t[i] / 86_400_000L
+            all[d] = (all[d] ?: 0) + 1
+            if (s.above20[i]) up[d] = (up[d] ?: 0) + 1
+        }
+        for (s in series) {
+            s.breadth = DoubleArray(s.t.size) { i ->
+                val d = s.t[i] / 86_400_000L
+                val n = all[d] ?: 0
+                if (n < 3) Double.NaN else (up[d] ?: 0).toDouble() / n
+            }
+        }
+    }
 
     data class Trade(
         val assetId: String,
@@ -143,9 +184,17 @@ object Backtest {
             score[i] = sig.technicalScore
             vol[i] = sig.metrics.volatility ?: Double.NaN
         }
+        val px = DoubleArray(n) { h[it].price }
+        fun above(i: Int, p: Int): Boolean {
+            if (i + 1 < p) return false
+            var sum = 0.0
+            for (k in i + 1 - p..i) sum += px[k]
+            return px[i] > sum / p
+        }
         return Series(
             asset.id, asset.symbol,
-            LongArray(n) { h[it].t }, DoubleArray(n) { h[it].price }, score, vol, costs
+            LongArray(n) { h[it].t }, px, score, vol, costs,
+            BooleanArray(n) { above(it, 100) }, BooleanArray(n) { above(it, 20) }
         )
     }
 
@@ -161,6 +210,7 @@ object Backtest {
             while (i < n - 1) {
                 val sc = s.score[i]
                 if (sc < p.threshold) { i++; continue }
+                if (p.filter != 0 && !filterOk(p.filter, s.above100[i], s.breadth[i].takeIf { it.isFinite() })) { i++; continue }
                 // خرید در پایانی همان روز به قیمت فروشنده (نصف اسپرد) + کارمزد
                 val entry = s.close[i]
                 val stopPct = p.stopFor(s.vol[i].takeIf { it.isFinite() })
@@ -260,9 +310,10 @@ object Backtest {
         }
         val mults = listOf(1.0, 2.0, 3.0, 4.5)
         val holds = listOf(7, 15, 30, 0)
+        val filters = listOf(0, 1, 2, 3)
         val out = ArrayList<Params>()
-        for (t in th) for (tp in tps) for ((mn, mx) in stops) for (k in mults) for (tr in trails) for (hd in holds) {
-            out.add(Params(t, tp, k, mn, mx, tr, hd))
+        for (t in th) for (tp in tps) for ((mn, mx) in stops) for (k in mults) for (tr in trails) for (hd in holds) for (f in filters) {
+            out.add(Params(t, tp, k, mn, mx, tr, hd, f))
         }
         return out
     }
@@ -271,7 +322,7 @@ object Backtest {
         Params(
             threshold, plan.tpPct,
             if (plan.volStopMult > 0) plan.volStopMult else 2.5,
-            plan.minStopPct, plan.maxStopPct, plan.trailPct, plan.maxHoldDays
+            plan.minStopPct, plan.maxStopPct, plan.trailPct, plan.maxHoldDays, plan.entryFilter
         )
 
     private fun minTrades(m: MarketKind, assets: Int): Int = when (m) {
@@ -287,6 +338,7 @@ object Backtest {
      */
     fun optimize(m: MarketKind, series: List<Series>, current: Params, settings: AppSettings): MarketResult? {
         if (series.isEmpty()) return null
+        attachBreadth(series)
         val allT = series.flatMap { listOf(it.t.first(), it.t.last()) }
         val fromT = allT.minOrNull() ?: return null
         val toT = allT.maxOrNull() ?: return null
@@ -361,6 +413,7 @@ object Backtest {
             stopPct = (p.minStopPct + p.maxStopPct) / 2,
             trailPct = p.trailPct,
             maxHoldDays = p.maxHoldDays,
+            entryFilter = p.filter,
             buyThresholdDelta = p.threshold - baseThreshold,
             tuned = true
         )

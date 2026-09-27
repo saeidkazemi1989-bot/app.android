@@ -37,6 +37,8 @@ class RiskManager {
         val buyThresholdDelta: Int = 0,
         /** مهلت نگهداری به روز (۰ = بدون مهلت). */
         val maxHoldDays: Int = 0,
+        /** فیلتر ورود بک‌تست (بیت ۱: بالای میانگین ۱۰۰ روزه، بیت ۲: پهنای بازار ≥ ۵۰٪). */
+        val entryFilter: Int = 0,
         /** پارامترها از بک‌تست آمده‌اند. */
         val tuned: Boolean = false
     ) {

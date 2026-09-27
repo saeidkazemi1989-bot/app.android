@@ -1007,6 +1007,12 @@ class TradeEngine(
                 val guard = com.saeidkazemi.trader.analysis.Performance.guard(journal.all(), m, settings)
                 val th = settings.buyThreshold + plan.buyThresholdDelta
                 if (guard.active) notes.add("محافظ نرخ برد (" + m.faTitle + "): " + guard.text + ".")
+                // فیلتر ورود بک‌تست: پهنای بازار = سهم دارایی‌های این بازار بالای میانگین ۲۰ روزه
+                val breadthNow: Double? = if ((plan.entryFilter and 2) != 0) {
+                    val hs = assets.filter { it.market == m && !it.isDisplayOnly && !it.isSimulated }
+                        .mapNotNull { a -> histories[a.id]?.map { it.price }?.takeIf { it.size >= 20 } }
+                    if (hs.size < 3) null else hs.count { v -> v.last() > v.takeLast(20).average() }.toDouble() / hs.size
+                } else null
                 for (sig in signals) {
                     if (sig.market != m || sig.action != Action.BUY) continue
                     val acc = broker.account()
@@ -1027,6 +1033,14 @@ class TradeEngine(
                     }
                     // خرید خودکار سهمِ در صف فروش ممنوع: فروشنده‌ها روی کف قیمت صف کشیده‌اند و فروش بعدی ممکن است روزها طول بکشد.
                     if (asset.sellQueue) { skip("در صف فروش است"); continue }
+                    if (plan.entryFilter != 0) {
+                        val v = histories[asset.id]?.map { it.price }.orEmpty()
+                        val above100 = if (v.size >= 100) v.last() > v.takeLast(100).average() else null
+                        if (!Backtest.filterOk(plan.entryFilter, above100, breadthNow)) {
+                            skip("فیلتر بک‌تست: " + Backtest.filterLabel(plan.entryFilter) + " برقرار نیست")
+                            continue
+                        }
+                    }
                     if (guard.active && sig.score < th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD) {
                         skip("محافظ نرخ برد: امتیاز کمتر از " + (th + com.saeidkazemi.trader.analysis.Performance.GUARD_EXTRA_THRESHOLD))
                         continue
