@@ -67,6 +67,65 @@ class PaperBroker(private val store: JsonStore) : Broker {
         cash
     }
 
+    /**
+     * تغییر تقسیم سرمایه بین بازارها **بدون** بستن خریدهای باز.
+     * موقعیت‌های باز سر جایشان می‌مانند و فقط نقد آزاد طوری جابه‌جا می‌شود که سهم هر بازار (نقد + ارزش موقعیت‌ها)
+     * تا حد ممکن به درصد جدید برسد. سود/زیان کل حساب تغییر نمی‌کند.
+     * @param valueOf ارزش دلاری فعلی هر موقعیت.
+     */
+    fun reallocate(allocations: Map<String, Double>, valueOf: (Position) -> Double): AccountState = synchronized(lock) {
+        val a = ensure()
+        val alloc = normalizedAlloc(allocations)
+        val keys = alloc.keys
+        val posVal = keys.associateWith { k ->
+            a.positions.filter { it.market.name == k }.sumOf { p -> valueOf(p).takeIf { it.isFinite() && it >= 0 } ?: p.cost() }
+        }
+        val totalCash = a.cashByMarket.values.filter { it.isFinite() }.sum()
+        val equity = totalCash + posVal.values.sum()
+        val desired = keys.associateWith { k -> maxOf(0.0, equity * (alloc[k] ?: 0.0) - (posVal[k] ?: 0.0)) }
+        val sumDesired = desired.values.sum()
+        val cash = keys.associateWith { k ->
+            if (sumDesired > 0) totalCash * (desired[k] ?: 0.0) / sumDesired else totalCash * (alloc[k] ?: 0.0)
+        }
+        val next = a.copy(
+            cashByMarket = cash,
+            // مبنای سود/زیان هر بخش از همین لحظه (سود محقق‌شده قبلی هر بازار حفظ می‌شود)
+            capitalByMarket = keys.associateWith { k -> (cash[k] ?: 0.0) + (posVal[k] ?: 0.0) }
+        )
+        acc = next
+        store.saveAccount(next)
+        next
+    }
+
+    /**
+     * افزایش یا کاهش سرمایه **بدون** بستن خریدهای باز.
+     * افزایش: مابه‌التفاوت به نسبت تقسیم سرمایه به نقد هر بازار اضافه می‌شود.
+     * کاهش: فقط از نقد آزاد برداشته می‌شود؛ اگر نقد آزاد کافی نباشد انجام نمی‌شود (null).
+     */
+    fun adjustCapital(newCapitalUsd: Double, allocations: Map<String, Double>): AccountState? = synchronized(lock) {
+        val a = ensure()
+        if (!newCapitalUsd.isFinite() || newCapitalUsd <= 0) return@synchronized null
+        val delta = newCapitalUsd - a.initialCapitalUsd
+        val alloc = normalizedAlloc(allocations)
+        val keys = alloc.keys + a.cashByMarket.keys
+        val change: Map<String, Double> = if (delta >= 0) {
+            keys.associateWith { k -> delta * (alloc[k] ?: 0.0) }
+        } else {
+            val totalCash = a.cashByMarket.values.filter { it > 0 }.sum()
+            if (totalCash + 1e-9 < -delta) return@synchronized null
+            keys.associateWith { k -> delta * (maxOf(0.0, a.cashByMarket[k] ?: 0.0) / totalCash) }
+        }
+        val next = a.copy(
+            cashUsd = a.cashUsd + delta,
+            initialCapitalUsd = newCapitalUsd,
+            cashByMarket = keys.associateWith { k -> (a.cashByMarket[k] ?: 0.0) + (change[k] ?: 0.0) },
+            capitalByMarket = keys.associateWith { k -> (a.capitalByMarket[k] ?: 0.0) + (change[k] ?: 0.0) }
+        )
+        acc = next
+        store.saveAccount(next)
+        next
+    }
+
     /** نقد آزاد یک بازار. */
     fun cashOf(market: MarketKind): Double = synchronized(lock) { ensure().cashByMarket[market.name] ?: 0.0 }
 

@@ -59,9 +59,11 @@ class TraderController(
         }
         scope.launch(Dispatchers.IO) {
             val settings = container.store.loadSettings()
+            val account = container.broker.account()
             _state.update {
-                it.copy(settings = settings, account = container.broker.account(), loading = true)
+                it.copy(settings = settings, account = account, loading = true)
             }
+            announceUpdate(settings, account)
             if (settings.autoTrade) hooks.onAutoTradeChanged(true)
             runCycleInternal("initial")
         }
@@ -74,6 +76,25 @@ class TraderController(
                 }
             }
         }
+    }
+
+    /** بعد از به‌روزرسانی برنامه: اطمینان به کاربر که خریدها و ژورنال حفظ شده‌اند (یا گزارش بازیابی). */
+    private fun announceUpdate(settings: com.saeidkazemi.trader.data.model.AppSettings, account: com.saeidkazemi.trader.data.model.AccountState) {
+        val store = container.store
+        val msgs = ArrayList<String>()
+        if (settings.lastAppVersion != AppVersion.NAME) {
+            val journalSize = container.tradeEngine.journal.all().size
+            if (settings.lastAppVersion.isNotEmpty() || account.positions.isNotEmpty() || account.trades.isNotEmpty()) {
+                msgs.add(
+                    "به‌روزرسانی به نسخه " + AppVersion.NAME + " انجام شد؛ " + account.positions.size + " خرید باز، " +
+                        account.trades.size + " معامله و " + journalSize + " ردیف ژورنال حفظ شد."
+                )
+            }
+            store.saveSettings(store.loadSettings().copy(lastAppVersion = AppVersion.NAME))
+        }
+        msgs.addAll(store.recoveryNotes)
+        store.recoveryNotes.clear()
+        if (msgs.isNotEmpty()) toast(msgs.joinToString(" "))
     }
 
     /** یک دور کامل: به‌روزرسانی بازار، تحلیل، اخبار، مدیریت ریسک و (در حالت خودکار) خرید و فروش. */
@@ -270,10 +291,9 @@ class TraderController(
     }
 
     /**
-     * تقسیم سرمایه بین بازارها (درصد). چون هر بازار صندوق جداگانه دارد، حساب دمو با همان سرمایه
-     * و تقسیم‌بندی جدید از نو ساخته می‌شود.
+     * تقسیم جدید سرمایه بین بازارها. خریدهای باز **بسته نمی‌شوند**؛ فقط نقد آزاد بین بازارها جابه‌جا می‌شود.
      */
-    fun setAllocationsAndReset(crypto: Double, ir: Double, metal: Double, fx: Double) {
+    fun setAllocations(crypto: Double, ir: Double, metal: Double, fx: Double) {
         val vals = listOf(crypto, ir, metal, fx)
         if (vals.any { !it.isFinite() || it < 0 }) {
             toast("درصدهای معتبر وارد کنید.")
@@ -288,10 +308,33 @@ class TraderController(
             val alloc = mapOf("CRYPTO" to crypto, "IR_STOCK" to ir, "METAL" to metal, "FX" to fx)
             val settings = container.store.loadSettings().copy(allocations = alloc)
             container.store.saveSettings(settings)
-            container.broker.reset(settings.capitalUsd, alloc)
-            container.tradeEngine.journal.clear()
-            _state.update { it.copy(settings = settings, account = container.broker.account(), journal = emptyList(), perf = com.saeidkazemi.trader.analysis.PerfReport()) }
-            toast("سرمایه بین بازارها تقسیم شد و حساب دمو از نو ساخته شد.")
+            val prices = _state.value.priceMap
+            val acc = container.broker.reallocate(alloc) { p -> (prices[p.assetId] ?: p.avgBuyUsd) * p.qty }
+            _state.update { it.copy(settings = settings, account = acc) }
+            toast(
+                "تقسیم جدید سرمایه اعمال شد" +
+                    (if (acc.positions.isNotEmpty()) "؛ " + acc.positions.size + " خرید باز دست نخورد و فقط نقد آزاد جابه‌جا شد." else ".")
+            )
+        }
+    }
+
+    /** تغییر سرمایه بدون بستن خریدها (افزایش: به نقد اضافه می‌شود؛ کاهش: فقط از نقد آزاد). */
+    fun changeCapital(amountUsd: Double) {
+        if (!amountUsd.isFinite() || amountUsd <= 0) {
+            toast("سرمایه معتبر وارد کنید.")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val s0 = container.store.loadSettings()
+            val acc = container.broker.adjustCapital(amountUsd, s0.allocations)
+            if (acc == null) {
+                toast("نقد آزاد برای این کاهش سرمایه کافی نیست (بخشی از پول در خریدهای باز است). خریدها بسته نشدند.")
+                return@launch
+            }
+            val settings = s0.copy(capitalUsd = amountUsd)
+            container.store.saveSettings(settings)
+            _state.update { it.copy(settings = settings, account = acc) }
+            toast("سرمایه به " + com.saeidkazemi.trader.util.Format.num(amountUsd, 0) + " دلار تغییر کرد؛ خریدهای باز حفظ شدند.")
         }
     }
 
@@ -308,6 +351,7 @@ class TraderController(
         toast("پله کارمزد نوبیتکس: " + com.saeidkazemi.trader.trading.Fees.NOBITEX_TIERS[t].name)
     }
 
+    /** شروع مجدد کامل حساب دمو — همه خریدها و ژورنال پاک می‌شوند. فقط بعد از تأیید صریح کاربر صدا زده می‌شود. */
     fun setCapitalAndReset(amountUsd: Double) {
         if (!amountUsd.isFinite() || amountUsd <= 0) {
             toast("سرمایه معتبر وارد کنید.")

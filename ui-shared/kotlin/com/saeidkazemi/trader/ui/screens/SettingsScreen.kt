@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -65,6 +67,32 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
         )
     }
 
+    var confirmReset by remember { mutableStateOf(false) }
+    if (confirmReset) {
+        val open = state.account.positions.size
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("شروع مجدد حساب دمو؟") },
+            text = {
+                Text(
+                    (if (open > 0) open.toString() + " خرید باز بسته و " else "") +
+                        "همه معاملات و ژورنال پاک می‌شود و حساب با سرمایه " +
+                        (capitalInput.toDoubleOrNull()?.let { Format.num(it, 0) } ?: "فعلی") + " دلار از نو ساخته می‌شود. این کار برگشت‌پذیر نیست.",
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    vm.setCapitalAndReset(capitalInput.toDoubleOrNull() ?: state.settings.capitalUsd)
+                }) { Text("بله، پاک کن و از نو بساز", color = Color(0xFFE5484D)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) { Text("انصراف (خریدها بمانند)") }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -74,9 +102,11 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
         item {
             SettingsCard("سرمایه حساب دمو") {
                 Text(
-                    "مبلغی که معامله‌گر (در حالت دمو) با آن کار می‌کند. با ذخیره، حساب دمو از نو شروع می‌شود.",
+                    "مبلغی که معامله‌گر (در حالت دمو) با آن کار می‌کند. تغییر سرمایه خریدهای باز را نمی‌بندد: " +
+                        "افزایش به نقد هر بازار اضافه می‌شود و کاهش فقط از نقد آزاد برداشته می‌شود.",
                     fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
                 )
                 OutlinedTextField(
                     value = capitalInput,
@@ -90,13 +120,21 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                 Button(
                     onClick = {
                         val v = capitalInput.toDoubleOrNull()
-                        if (v != null) vm.setCapitalAndReset(v)
+                        if (v != null) vm.changeCapital(v) else vm.toast("سرمایه معتبر وارد کنید.")
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
                 ) {
-                    Text("ذخیره و شروع مجدد حساب دمو")
+                    Text("ذخیره سرمایه (خریدهای باز حفظ می‌شوند)")
+                }
+                OutlinedButton(
+                    onClick = { confirmReset = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Text("شروع مجدد کامل حساب دمو…", color = Color(0xFFE5484D))
                 }
             }
         }
@@ -108,7 +146,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                     "هر بازار صندوق جداگانه دارد و فقط با سهم خودش معامله می‌کند؛ سود و زیان هر بازار هم جدا حساب می‌شود. " +
                         "مثلاً ۵۰٪ ارز دیجیتال، ۴۰٪ بورس تهران و ۱۰٪ طلا و دلار (تتر، طلای PAXG، صندوق‌های طلا). " +
                         "ارز خارجی (فارکس) فقط شبیه‌سازی است و پیش‌فرض صفر است. صفر یعنی آن بازار معامله نمی‌شود. " +
-                        "با ذخیره، حساب دمو با تقسیم جدید از نو ساخته می‌شود.",
+                        "با ذخیره، خریدهای باز دست نمی‌خورند و فقط نقد آزاد بین بازارها جابه‌جا می‌شود.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
@@ -167,7 +205,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                 )
                 Button(
                     onClick = {
-                        vm.setAllocationsAndReset(
+                        vm.setAllocations(
                             allocInputs[MarketKind.CRYPTO]?.toDoubleOrNull() ?: -1.0,
                             allocInputs[MarketKind.IR_STOCK]?.toDoubleOrNull() ?: -1.0,
                             allocInputs[MarketKind.METAL]?.toDoubleOrNull() ?: -1.0,
@@ -178,7 +216,7 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                         .fillMaxWidth()
                         .padding(top = 8.dp)
                 ) {
-                    Text("ذخیره تقسیم سرمایه و شروع مجدد حساب دمو")
+                    Text("ذخیره تقسیم سرمایه (خریدهای باز حفظ می‌شوند)")
                 }
             }
         }

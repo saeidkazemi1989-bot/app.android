@@ -195,7 +195,9 @@ data class AppSettings(
      */
     val winRateGuard: Boolean = true,
     val minWinRatePct: Double = 40.0,
-    val guardWindow: Int = 10
+    val guardWindow: Int = 10,
+    /** آخرین نسخه برنامه که اجرا شده (برای پیام «خریدها بعد از به‌روزرسانی حفظ شد»). */
+    val lastAppVersion: String = ""
 ) {
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
     fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel

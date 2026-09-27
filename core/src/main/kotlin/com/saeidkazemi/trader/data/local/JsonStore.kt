@@ -1,15 +1,31 @@
 package com.saeidkazemi.trader.data.local
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.saeidkazemi.trader.data.model.AccountState
 import com.saeidkazemi.trader.data.model.AppSettings
 import java.io.File
 
-/** ذخیره‌سازی ساده و پایدار مبتنی بر فایل JSON برای حساب، تنظیمات و وضعیت بازار. */
+/**
+ * ذخیره‌سازی ساده و پایدار مبتنی بر فایل JSON برای حساب، تنظیمات و وضعیت بازار.
+ *
+ * محافظت از داده‌ها (تا خریدها با به‌روزرسانی یا بسته شدن برنامه از بین نروند):
+ *  - اعداد نامعتبر (NaN/بی‌نهایت) دیگر باعث شکست بی‌صدای ذخیره نمی‌شوند؛
+ *  - قبل از هر بار ذخیره، نسخه قبلی در «name.bak» نگه داشته می‌شود؛
+ *  - اگر فایلی خراب باشد، از نسخه پشتیبان بازیابی می‌شود و فایل خراب هم کنار گذاشته (نه پاک) می‌شود؛
+ *  - حساب هرگز به‌خاطر خطای خواندن فایل، بی‌صدا از نو ساخته نمی‌شود.
+ */
 class JsonStore(private val dir: File) {
 
-    private val gson = Gson()
+    private val gson: Gson = GsonBuilder().serializeSpecialFloatingPointValues().create()
     private val lock = Any()
+
+    /** پیام‌های بازیابی/خطای ذخیره برای نمایش به کاربر. */
+    val recoveryNotes: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
+    @Volatile
+    var lastWriteError: String? = null
+        private set
 
     init {
         try {
@@ -29,6 +45,9 @@ class JsonStore(private val dir: File) {
     fun loadAccount(defaultCapitalUsd: Double): AccountState {
         val acc = read("account.json", AccountState::class.java)
         if (acc != null) return acc
+        if (File(dir, "account.json").exists()) {
+            recoveryNotes.add("فایل حساب قابل خواندن نبود و نسخه پشتیبان هم نبود؛ نسخه خراب با نام account.json.corrupt-* نگه داشته شد.")
+        }
         val fresh = AccountState(cashUsd = defaultCapitalUsd, initialCapitalUsd = defaultCapitalUsd)
         write("account.json", fresh)
         return fresh
@@ -69,30 +88,79 @@ class JsonStore(private val dir: File) {
         write("journal.json", JournalFile(entries))
     }
 
+    private fun <T> parse(f: File, type: Class<T>): T? =
+        try {
+            if (!f.exists() || f.length() == 0L) null else gson.fromJson(f.readText(Charsets.UTF_8), type)
+        } catch (e: Exception) {
+            null
+        }
+
     private fun <T> read(name: String, type: Class<T>): T? {
         return try {
             synchronized(lock) {
                 val f = File(dir, name)
-                if (!f.exists()) null else gson.fromJson(f.readText(Charsets.UTF_8), type)
+                val bak = File(dir, "$name.bak")
+                if (!f.exists()) {
+                    // اگر برنامه وسط ذخیره بسته شده باشد و فایل اصلی نباشد، پشتیبان جایگزین می‌شود.
+                    val b = parse(bak, type) ?: return@synchronized null
+                    recoveryNotes.add(label(name) + " از نسخه پشتیبان بازیابی شد.")
+                    return@synchronized b
+                }
+                parse(f, type)?.let { return@synchronized it }
+                // فایل خراب: کنار گذاشتن (نه پاک کردن) و بازیابی از پشتیبان
+                try {
+                    f.copyTo(File(dir, "$name.corrupt-" + System.currentTimeMillis()), overwrite = true)
+                } catch (_: Exception) {
+                }
+                val b = parse(bak, type)
+                if (b != null) {
+                    recoveryNotes.add(label(name) + " خراب بود و از نسخه پشتیبان بازیابی شد.")
+                    try {
+                        bak.copyTo(f, overwrite = true)
+                    } catch (_: Exception) {
+                    }
+                }
+                b
             }
         } catch (e: Exception) {
             null
         }
     }
 
+    private fun label(name: String): String = when (name) {
+        "account.json" -> "حساب (موجودی و خریدها)"
+        "journal.json" -> "ژورنال معاملات"
+        "settings.json" -> "تنظیمات"
+        else -> name
+    }
+
     private fun write(name: String, obj: Any) {
         try {
+            val json = gson.toJson(obj)
             synchronized(lock) {
                 val target = File(dir, name)
                 val tmp = File(dir, "$name.tmp")
-                tmp.writeText(gson.toJson(obj), Charsets.UTF_8)
+                tmp.writeText(json, Charsets.UTF_8)
+                // نسخه سالم قبلی به‌عنوان پشتیبان
+                if (target.exists() && target.length() > 0L && name != "tracks.json") {
+                    try {
+                        java.nio.file.Files.copy(
+                            target.toPath(),
+                            File(dir, "$name.bak").toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
                 java.nio.file.Files.move(
                     tmp.toPath(),
                     target.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING
                 )
             }
-        } catch (_: Exception) {
+            lastWriteError = null
+        } catch (e: Exception) {
+            lastWriteError = name + ": " + (e.message ?: e.toString())
         }
     }
 }
