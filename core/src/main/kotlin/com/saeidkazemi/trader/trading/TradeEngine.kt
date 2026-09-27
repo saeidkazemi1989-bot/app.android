@@ -1056,16 +1056,26 @@ class TradeEngine(
                     val budget = equity * plan.positionPct *
                         (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0)
                     val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve
-                    val amount = minOf(budget, available)
+                    var amount = minOf(budget, available)
+                    var sizeNote = ""
+                    // سهم کوچک: اگر درصد هر موقعیت از حداقل معامله کمتر شد ولی نقد کافی هست، با حداقل مبلغ خرید می‌شود
+                    // (به‌جای اینکه این بازار هیچ‌وقت معامله نکند). در عمل تعداد موقعیت‌ها کمتر از سقف می‌شود.
+                    if (amount < plan.minTradeUsd && available >= plan.minTradeUsd) {
+                        amount = plan.minTradeUsd
+                        sizeNote = "، حداقل مبلغ معامله چون سهم این بازار کوچک است"
+                    }
                     if (amount < plan.minTradeUsd) {
+                        val held = acc.positions.count { it.market == m }
                         stopReason = "نقد آزاد این بازار ($" + Format.num(maxOf(0.0, available)) + " پس از ذخیره نقدی) کمتر از حداقل معامله ($" +
-                            Format.num(plan.minTradeUsd, 0) + ") است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
+                            Format.num(plan.minTradeUsd, 0) + ") است؛ " +
+                            (if (held > 0) "خرید بعدی بعد از فروش یکی از " + held + " موقعیت فعلی"
+                            else "برای معامله در این بازار سهم آن را در تنظیمات ← تقسیم سرمایه بیشتر کنید")
                         break
                     }
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
                     val rrPart = plan.plannedRR(sig.metrics.volatility).takeIf { it > 0 }?.let { "، ریسک به ریوارد ۱:" + Format.trim(it, 1) } ?: ""
-                    val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + ")"
+                    val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + sizeNote + ")"
                     val stopPct = plan.stopFor(sig.metrics.volatility)
                     announce("BUY", asset, amount, reason)
                     val hs = halfSpread(asset, null)
