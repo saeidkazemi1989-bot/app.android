@@ -397,8 +397,11 @@ object Backtest {
         when {
             target != null && oosOk(targetOut) -> {
                 chosen = target; chosenIn = targetIn; chosenOut = targetOut; applied = true
-                verdict = "به هدف نرخ برد " + t60 + "٪ رسید و در آزمون روی داده دیده‌نشده هم سودده بود (برد " +
-                    Math.round(targetOut!!.winRate) + "٪)؛ روی خریدهای جدید اعمال شد."
+                val ow = targetOut!!.winRate
+                verdict = if (ow >= TARGET_WIN_RATE - 5)
+                    "به هدف نرخ برد " + t60 + "٪ رسید (گذشته " + Math.round(targetIn!!.winRate) + "٪، آزمون روی داده دیده‌نشده " + Math.round(ow) + "٪) و سودده ماند؛ روی خریدهای جدید اعمال شد."
+                else "روی گذشته برد " + Math.round(targetIn!!.winRate) + "٪ داشت؛ در آزمون روی داده دیده‌نشده سودده ماند ولی برد به " +
+                    Math.round(ow) + "٪ رسید (ریوارد بزرگ‌تر جبران کرد)؛ اعمال شد."
             }
             profit != null && oosOk(profitOut) -> {
                 chosen = profit; chosenIn = profitIn; chosenOut = profitOut; applied = true
@@ -425,7 +428,7 @@ object Backtest {
             best = chosen,
             bestIn = chosenIn,
             bestOut = chosenOut,
-            reachedTarget = reached && applied && chosen == target,
+            reachedTarget = reached && applied && chosen == target && (chosenOut?.winRate ?: 0.0) >= TARGET_WIN_RATE - 5,
             applied = applied,
             verdict = verdict,
             tested = candidates.size,
