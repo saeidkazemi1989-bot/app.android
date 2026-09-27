@@ -123,17 +123,20 @@ class LanServer(
 
         /** نشانی‌های IPv4 محلی این دستگاه (وای‌فای/شبکه). */
         fun localAddresses(): List<String> = try {
-            NetworkInterface.getNetworkInterfaces().toList()
+            val up = NetworkInterface.getNetworkInterfaces().toList()
                 .filter { ni -> try { ni.isUp && !ni.isLoopback && !ni.isVirtual } catch (_: Exception) { false } }
-                .filterNot { ni ->
-                    val n = (ni.name + " " + (ni.displayName ?: "")).lowercase()
-                    listOf("vmware", "virtualbox", "vbox", "hyper-v", "docker", "vethernet", "wsl", "tun", "rmnet", "ccmni").any { it in n }
-                }
+            fun ips(list: List<NetworkInterface>) = list
                 .flatMap { ni -> ni.inetAddresses.toList() }
                 .filterIsInstance<Inet4Address>()
                 .filter { it.isSiteLocalAddress }
                 .map { it.hostAddress }
                 .distinct()
+            // اول کارت‌های شبکه واقعی (وای‌فای/کابل)؛ اگر چیزی نماند، همه
+            val real = up.filterNot { ni ->
+                val n = (ni.name + " " + (ni.displayName ?: "")).lowercase()
+                listOf("vmware", "virtualbox", "vbox", "hyper-v", "docker", "vethernet", "wsl", "tun", "rmnet", "ccmni").any { it in n }
+            }
+            ips(real).ifEmpty { ips(up) }
         } catch (e: Exception) {
             emptyList()
         }
