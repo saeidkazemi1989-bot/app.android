@@ -34,8 +34,15 @@ class RiskManager {
         /** فاصله حد ضرر متحرک از قله؛ ۰ یعنی غیرفعال. */
         val trailPct: Double = 0.0,
         /** آستانه خرید اختصاصی بازار (جمع با آستانه تنظیمات). */
-        val buyThresholdDelta: Int = 0
+        val buyThresholdDelta: Int = 0,
+        /** مهلت نگهداری به روز (۰ = بدون مهلت). */
+        val maxHoldDays: Int = 0,
+        /** پارامترها از بک‌تست آمده‌اند. */
+        val tuned: Boolean = false
     ) {
+        /** ریسک به ریوارد برنامه‌ریزی‌شده (حد سود ÷ حد ضرر). */
+        fun plannedRR(volatilityPct: Double?): Double = stopFor(volatilityPct).let { if (it > 0) tpPct / it else 0.0 }
+
         /** حد ضرر نهایی برای یک دارایی با نوسان روزانه مشخص (درصد). */
         fun stopFor(volatilityPct: Double?): Double {
             if (volStopMult <= 0 || volatilityPct == null || !volatilityPct.isFinite() || volatilityPct <= 0) return stopPct

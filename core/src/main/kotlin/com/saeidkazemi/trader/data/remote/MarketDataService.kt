@@ -192,6 +192,21 @@ class MarketDataService {
         return RefreshResult(list, notes)
     }
 
+    /** تاریخچه طولانی (تا حدود ۲ سال) برای بک‌تست؛ بدون کش. */
+    suspend fun longHistory(asset: Asset, days: Int = 730): List<PricePoint> {
+        if (asset.isDisplayOnly || asset.isSimulated) return emptyList()
+        return when (asset.market) {
+            MarketKind.CRYPTO -> cryptoSource.longHistory(asset.symbol, days)
+            MarketKind.IR_STOCK -> iranSource.history(asset, minOf(days, 600))
+            MarketKind.METAL -> when {
+                asset.id.startsWith("nbx:") -> rialSource.history(asset, days)
+                asset.id.startsWith("ir:") -> iranSource.history(asset, minOf(days, 600))
+                else -> emptyList()
+            }
+            MarketKind.FX -> emptyList()
+        }
+    }
+
     /**
      * تاریخچه قیمت برای تحلیل. نتیجه موفق ۳ ساعت و شکست ۱۰ دقیقه کش می‌شود
      * (تا برنامه‌ای که روزها روشن است داده کهنه نداشته باشد و منبع خراب هر دقیقه دوباره صدا زده نشود).

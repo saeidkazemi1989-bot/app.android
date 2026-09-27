@@ -560,14 +560,14 @@ class IranStockSource {
     }
 
     /** تاریخچه ۱۲۰ روزه تعدیل‌شده؛ برای نمادهای شبیه‌سازی‌شده یک گام تصادفی قطعی. */
-    suspend fun history(asset: Asset): List<PricePoint> {
+    suspend fun history(asset: Asset, days: Int = 150): List<PricePoint> {
         if (asset.isSimulated) return simulatedHistory(asset)
         val insCode = asset.id.removePrefix("ir:")
-        val rows = parseDaily(get(API + "ClosingPrice/GetClosingPriceDailyList/$insCode/150"))
+        val rows = parseDaily(get(API + "ClosingPrice/GetClosingPriceDailyList/$insCode/$days"))
         if (rows.isEmpty()) return emptyList()
-        dailyRows[asset.id] = rows.takeLast(10)
+        if (days <= 150) dailyRows[asset.id] = rows.takeLast(10)
         // تاریخچه ورود/خروج پول حقیقی (۲۰ روز)؛ شکستش مانع تحلیل نمی‌شود.
-        try {
+        if (days <= 150) try {
             val fh = parseClientTypeHistory(get(API + "ClientType/GetClientTypeHistory/$insCode")).take(20)
             if (fh.isNotEmpty()) flowHistory[asset.id] = fh
         } catch (_: Exception) {

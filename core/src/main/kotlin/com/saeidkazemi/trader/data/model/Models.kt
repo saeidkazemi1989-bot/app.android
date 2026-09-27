@@ -197,7 +197,11 @@ data class AppSettings(
     val minWinRatePct: Double = 40.0,
     val guardWindow: Int = 10,
     /** آخرین نسخه برنامه که اجرا شده (برای پیام «خریدها بعد از به‌روزرسانی حفظ شد»). */
-    val lastAppVersion: String = ""
+    val lastAppVersion: String = "",
+    /** استفاده از پارامترهای بهینه بک‌تست (حد سود/ضرر، آستانه، مهلت نگهداری) برای خریدهای جدید. */
+    val useBacktestParams: Boolean = true,
+    /** زمان اولین اعمال پارامترهای بک‌تست (مهلت نگهداری فقط برای خریدهای بعد از آن). */
+    val backtestSince: Long = 0L
 ) {
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
     fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel

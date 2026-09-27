@@ -86,7 +86,9 @@ object JournalExport {
             out.add(Section("مدیریت ریسک", listOf(
                 "حد ضرر " + usd(e.stopUsd) + rel(e.stopUsd, e.entryUsd) + " • حد سود " + usd(e.takeProfitUsd) + rel(e.takeProfitUsd, e.entryUsd) +
                     (if (e.trailPct > 0) " • حد ضرر متحرک " + Format.num(e.trailPct * 100, 0) + "٪ زیر قله" else "") +
-                    (e.riskLevel?.let { " • ریسک " + riskFa(it) } ?: "")
+                    (e.riskLevel?.let { " • ریسک " + riskFa(it) } ?: "") +
+                    (if (e.stopUsd > 0 && e.stopUsd < e.entryUsd && e.takeProfitUsd > e.entryUsd)
+                        " • ریسک به ریوارد ۱ به " + Format.trim((e.takeProfitUsd - e.entryUsd) / (e.entryUsd - e.stopUsd), 2) else "")
             )))
         }
         if (!e.dataSources.isNullOrEmpty()) out.add(Section("منابع اطلاعات", e.dataSources.map { "• $it" }))

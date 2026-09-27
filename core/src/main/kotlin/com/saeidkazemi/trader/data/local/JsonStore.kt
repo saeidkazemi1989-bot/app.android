@@ -73,6 +73,14 @@ class JsonStore(private val dir: File) {
         write("tracks.json", TrackFile(tracks))
     }
 
+    fun loadBacktest(): com.saeidkazemi.trader.analysis.Backtest.Report? =
+        read("backtest.json", com.saeidkazemi.trader.analysis.Backtest.Report::class.java)
+            ?.takeIf { it.results != null }
+
+    fun saveBacktest(r: com.saeidkazemi.trader.analysis.Backtest.Report) {
+        write("backtest.json", r)
+    }
+
     /** ژورنال معاملات (دلایل ورود/خروج و نتیجه). */
     data class JournalFile(val entries: List<com.saeidkazemi.trader.data.model.JournalEntry>? = null)
 

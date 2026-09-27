@@ -141,6 +141,9 @@ class CryptoSource {
         }
     }
 
+    /** تاریخچه طولانی (برای بک‌تست) فقط از نوبیتکس؛ تا حدود ۲ سال. */
+    suspend fun longHistory(symbol: String, days: Int): List<PricePoint> = nobitexHistory(symbol, days)
+
     private suspend fun nobitexHistory(symbol: String, days: Int): List<PricePoint> {
         val sym = symbol.uppercase().filter { it.isLetterOrDigit() }
         if (sym.isEmpty() || sym == "USDT") return emptyList()

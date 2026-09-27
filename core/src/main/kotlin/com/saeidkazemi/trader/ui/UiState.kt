@@ -91,6 +91,9 @@ data class UiState(
     /** روند کلی هر بازار. */
     val marketTrends: List<com.saeidkazemi.trader.analysis.MarketTrendReport> = emptyList(),
     /** وضعیت ربات در هر بازار در آخرین دور (چرا خرید/فروش کرد یا نکرد). */
+    val backtest: com.saeidkazemi.trader.analysis.Backtest.Report? = null,
+    val backtestRunning: Boolean = false,
+    val backtestProgress: String? = null,
     val activity: List<com.saeidkazemi.trader.trading.MarketActivity> = emptyList()
 ) {
     val equityUsd: Double

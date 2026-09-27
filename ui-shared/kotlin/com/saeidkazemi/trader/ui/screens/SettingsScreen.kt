@@ -184,9 +184,12 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                             )
                         }
                     }
-                    val plan = RiskManager().plan(state.settings.riskFor(m), m)
+                    val plan = vm.container.tradeEngine.planFor(state.settings, m)
                     Text(
+                        (if (plan.tuned) "✓ پارامتر بک‌تست • " else "") +
                         "تا " + plan.maxPositions + " موقعیت، هر کدام " + Format.num(plan.positionPct * 100, 0) + "٪ این بخش، " +
+                            "حد سود " + Format.trim(plan.tpPct * 100, 1) + "٪، " +
+                            (if (plan.maxHoldDays > 0) "مهلت نگهداری " + plan.maxHoldDays + " روز، " else "") +
                             "حد ضرر بر اساس نوسان " + Format.num(plan.minStopPct * 100, 1) + "–" + Format.num(plan.maxStopPct * 100, 1) + "٪، " +
                             "حد ضرر متحرک " + Format.num(plan.trailPct * 100, 1) + "٪ زیر قله" +
                             (if (m == MarketKind.IR_STOCK) "؛ فقط در ساعت بازار و بدون صف" else if (m == MarketKind.CRYPTO) "؛ ۲۴ ساعته" else if (m == MarketKind.METAL) "؛ تتر و PAXG ۲۴ ساعته، صندوق طلا در ساعت بورس" else if (m == MarketKind.FX) "؛ فقط شبیه‌سازی (نرخ مرجع)" else ""),

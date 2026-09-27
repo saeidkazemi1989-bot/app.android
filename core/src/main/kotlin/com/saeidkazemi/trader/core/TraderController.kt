@@ -151,7 +151,10 @@ class TraderController(
                 journal = journal,
                 perf = com.saeidkazemi.trader.analysis.Performance.report(journal, settings),
                 marketTrends = trends,
-                activity = container.tradeEngine.lastActivity
+                activity = container.tradeEngine.lastActivity,
+                backtest = container.tradeEngine.backtest,
+                backtestRunning = container.tradeEngine.backtestRunning,
+                backtestProgress = container.tradeEngine.backtestProgress
             )
         }
     }
@@ -336,6 +339,42 @@ class TraderController(
             _state.update { it.copy(settings = settings, account = acc) }
             toast("سرمایه به " + com.saeidkazemi.trader.util.Format.num(amountUsd, 0) + " دلار تغییر کرد؛ خریدهای باز حفظ شدند.")
         }
+    }
+
+    /** اجرای دستی بک‌تست (چند ده ثانیه تا چند دقیقه؛ در پس‌زمینه). */
+    fun runBacktest() {
+        if (container.tradeEngine.backtestRunning) {
+            toast("بک‌تست در حال اجراست…")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            _state.update { it.copy(backtestRunning = true, backtestProgress = "شروع بک‌تست…") }
+            val progress = scope.launch(Dispatchers.IO) {
+                while (true) {
+                    delay(1500)
+                    _state.update { it.copy(backtestProgress = container.tradeEngine.backtestProgress ?: it.backtestProgress) }
+                }
+            }
+            val r = try {
+                container.tradeEngine.runBacktest()
+            } catch (e: Exception) {
+                null
+            }
+            progress.cancel()
+            _state.update { it.copy(backtest = container.tradeEngine.backtest, backtestRunning = false, backtestProgress = null) }
+            toast(
+                if (r == null || r.results.isEmpty()) "بک‌تست انجام نشد (داده در دسترس نبود)."
+                else "بک‌تست تمام شد: " + r.results.joinToString("، ") { m ->
+                    m.market.faTitle + " " + (m.bestOut ?: m.currentOut).let { Math.round(it.winRate).toString() + "٪ برد" } +
+                        (if (m.applied) " (اعمال شد)" else "")
+                }
+            )
+        }
+    }
+
+    fun setUseBacktest(on: Boolean) {
+        updateSettings { it.copy(useBacktestParams = on) }
+        toast(if (on) "پارامترهای بک‌تست برای خریدهای جدید استفاده می‌شود." else "تنظیمات پیش‌فرض ریسک استفاده می‌شود.")
     }
 
     fun setFeePct(pct: Double) {

@@ -253,6 +253,30 @@ fun runSelfTest(outDir: File): Int {
                 com.saeidkazemi.trader.ui.screens.PortfolioScreen(s, onSell = {}, onOpenAsset = {})
             }
         }
+        run {
+            val t0 = System.currentTimeMillis()
+            val r = runBlocking {
+                withTimeoutOrNull(900_000) {
+                    while (container.tradeEngine.backtestRunning) delay(500)
+                    container.tradeEngine.backtest ?: container.tradeEngine.runBacktest()
+                }
+            }
+            fun f(s: com.saeidkazemi.trader.analysis.Backtest.Stats?): String =
+                if (s == null) "-" else "n=${s.trades} wr=${"%.1f".format(s.winRate)} rr=${"%.2f".format(s.rr)} exp=${"%.2f".format(s.expectancyPct)} pf=${"%.2f".format(s.profitFactor)} dd=${"%.1f".format(s.maxDrawdownPct)}"
+            fun pp(p: com.saeidkazemi.trader.analysis.Backtest.Params?): String =
+                if (p == null) "-" else "th=${p.threshold} tp=${"%.1f".format(p.tpPct * 100)} k=${p.stopMult} st=${"%.1f".format(p.minStopPct * 100)}-${"%.1f".format(p.maxStopPct * 100)} tr=${"%.0f".format(p.trailPct * 100)} hold=${p.maxHoldDays}"
+            out("bt time=${(System.currentTimeMillis() - t0) / 1000}s results=${r?.results?.size} notes=${r?.notes}")
+            r?.results?.forEach { m ->
+                out("bt ${m.market.name} a=${m.assets} d=${m.days} applied=${m.applied} hit60=${m.reachedTarget} | CUR ${pp(m.current)} IN ${f(m.currentIn)} OUT ${f(m.currentOut)} | BEST ${pp(m.best)} IN ${f(m.bestIn)} OUT ${f(m.bestOut)} | exits=${m.exitMix}")
+            }
+        }
+        shot("14-backtest", 760, 2200) {
+            val s by controller.state.collectAsState()
+            com.saeidkazemi.trader.ui.components.BacktestCard(
+                s.copy(backtest = container.tradeEngine.backtest, backtestRunning = false),
+                onRun = {}, onToggle = {}
+            )
+        }
         shot("13-activity", 760, 1300) {
             val s by controller.state.collectAsState()
             com.saeidkazemi.trader.ui.components.BotActivityCard(s)

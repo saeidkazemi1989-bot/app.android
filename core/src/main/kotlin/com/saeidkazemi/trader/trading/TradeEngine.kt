@@ -22,6 +22,11 @@ import com.saeidkazemi.trader.data.model.AppSettings
 import com.saeidkazemi.trader.util.Format
 import com.saeidkazemi.trader.util.IranMarket
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import com.saeidkazemi.trader.analysis.Backtest
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -86,8 +91,111 @@ class TradeEngine(
     /** رویدادهای شروع/پایان معامله برای هشدار صوتی، لرزش و اعلان. */
     val events: SharedFlow<TradeEvent> = _events
 
-    private fun planFor(settings: AppSettings, m: MarketKind): RiskManager.Plan =
-        riskManager.plan(settings.riskFor(m), m)
+    /** برنامه ریسک هر بازار؛ اگر بک‌تست پارامتر تأییدشده داشته باشد، حد سود/ضرر/آستانه/مهلت از آن می‌آید. */
+    fun planFor(settings: AppSettings, m: MarketKind): RiskManager.Plan {
+        val base = riskManager.plan(settings.riskFor(m), m)
+        if (!settings.useBacktestParams) return base
+        val p = backtest?.appliedFor(m) ?: return base
+        return Backtest.applyTo(base, p, settings.buyThreshold)
+    }
+
+    // ---- بک‌تست روزانه ----
+
+    @Volatile
+    var backtest: Backtest.Report? = try { store.loadBacktest() } catch (_: Exception) { null }
+        private set
+
+    @Volatile
+    var backtestRunning: Boolean = false
+        private set
+
+    @Volatile
+    var backtestProgress: String? = null
+        private set
+
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** هر ۲۴ ساعت یک بار بک‌تست در پس‌زمینه (بدون معطل کردن معاملات). */
+    private fun maybeStartBacktest() {
+        if (backtestRunning) return
+        val last = backtest?.createdAt ?: 0L
+        if (System.currentTimeMillis() - last < 24 * 3_600_000L) return
+        if (market.cachedAssets().isEmpty()) return
+        bgScope.launch {
+            try {
+                runBacktest()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * بک‌تست همه بازارهای قابل معامله روی تاریخچه طولانی و انتخاب پارامتر با هدف نرخ برد ۶۰٪ و امید ریاضی مثبت.
+     * نتیجه ذخیره و (در صورت تأیید خارج از نمونه) برای خریدهای جدید اعمال می‌شود.
+     */
+    suspend fun runBacktest(): Backtest.Report? {
+        if (backtestRunning) return backtest
+        backtestRunning = true
+        try {
+            val settings = store.loadSettings()
+            val assets = market.cachedAssets()
+            val results = ArrayList<Backtest.MarketResult>()
+            val notes = ArrayList<String>()
+            val sem = Semaphore(4)
+            for (m in listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.METAL)) {
+                val pool = assets.filter { it.market == m && !it.isDisplayOnly && !it.isSimulated }
+                    .sortedBy { it.rank ?: Int.MAX_VALUE }
+                    .take(if (m == MarketKind.IR_STOCK) 40 else 30)
+                if (pool.isEmpty()) {
+                    notes.add(m.faTitle + ": داده زنده در دسترس نبود؛ بک‌تست انجام نشد.")
+                    continue
+                }
+                backtestProgress = "دریافت تاریخچه " + m.faTitle + " (" + pool.size + " دارایی)…"
+                val series = coroutineScope {
+                    pool.map { a ->
+                        async {
+                            sem.withPermit {
+                                val h = try { market.longHistory(a, 730) } catch (_: Exception) { emptyList() }
+                                val costs = Backtest.Costs(
+                                    feeFor(a, m, true, settings), feeFor(a, m, false, settings), halfSpread(a, m)
+                                )
+                                Backtest.prepare(a, h, settings, costs)
+                            }
+                        }
+                    }.awaitAll().filterNotNull()
+                }
+                if (series.isEmpty()) {
+                    notes.add(m.faTitle + ": تاریخچه کافی دریافت نشد.")
+                    continue
+                }
+                backtestProgress = "بهینه‌سازی " + m.faTitle + "…"
+                val base = riskManager.plan(settings.riskFor(m), m)
+                val current = Backtest.paramsOf(base, settings.buyThreshold + base.buyThresholdDelta)
+                Backtest.optimize(m, series, current, settings)?.let { results.add(it) }
+            }
+            if (results.isEmpty() && backtest != null) return backtest
+            val report = Backtest.Report(System.currentTimeMillis(), results, notes)
+            backtest = report
+            store.saveBacktest(report)
+            if (results.any { it.applied }) {
+                val s = store.loadSettings()
+                if (s.backtestSince <= 0) store.saveSettings(s.copy(backtestSince = report.createdAt))
+            }
+            return report
+        } finally {
+            backtestRunning = false
+            backtestProgress = null
+        }
+    }
+
+    /** مهلت نگهداری بک‌تست فقط برای خریدهایی که بعد از اعمال همان بک‌تست انجام شده‌اند. */
+    private fun holdExpired(pos: com.saeidkazemi.trader.data.model.Position, settings: AppSettings): Boolean {
+        val plan = planFor(settings, pos.market)
+        if (!plan.tuned || plan.maxHoldDays <= 0) return false
+        val since = settings.backtestSince
+        if (since <= 0 || pos.openedAt < since) return false
+        return System.currentTimeMillis() - pos.openedAt >= plan.maxHoldDays * 86_400_000L
+    }
 
     /** ارزش کل (نقد + موقعیت‌ها) بخش اختصاصی یک بازار. */
     private fun sleeveEquity(acc: AccountState, m: MarketKind, prices: Map<String, Double>): Double =
@@ -855,6 +963,7 @@ class TradeEngine(
                 curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (قفل سود)"
                 curUsd <= pos.stopLossUsd -> "فعال شدن حد ضرر"
                 curUsd >= pos.takeProfitUsd -> "فعال شدن حد سود"
+                holdExpired(pos, settings) -> "پایان مهلت نگهداری " + planFor(settings, pos.market).maxHoldDays + " روزه (طبق بک‌تست)"
                 sig != null && sig.newsBlocked -> "خروج به‌خاطر خبر منفی مهم"
                 sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
                 sig != null && sig.score <= settings.sellThreshold -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
@@ -935,7 +1044,8 @@ class TradeEngine(
                     }
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
-                    val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + ")"
+                    val rrPart = plan.plannedRR(sig.metrics.volatility).takeIf { it > 0 }?.let { "، ریسک به ریوارد ۱:" + Format.trim(it, 1) } ?: ""
+                    val reason = "خرید خودکار (امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + ")"
                     val stopPct = plan.stopFor(sig.metrics.volatility)
                     announce("BUY", asset, amount, reason)
                     val hs = halfSpread(asset, null)
@@ -976,6 +1086,7 @@ class TradeEngine(
 
         store.saveAccount(broker.account())
         tracker.record(broker.account().positions, priceMap)
+        maybeStartBacktest()
         val report = CycleReport(
             ts = System.currentTimeMillis(),
             trigger = trigger,

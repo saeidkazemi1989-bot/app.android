@@ -50,7 +50,9 @@ import com.saeidkazemi.trader.util.Format
 fun JournalScreen(
     state: UiState,
     onToast: (String) -> Unit,
-    onOpenAsset: (String) -> Unit
+    onOpenAsset: (String) -> Unit,
+    onRunBacktest: (() -> Unit)? = null,
+    onToggleBacktest: ((Boolean) -> Unit)? = null
 ) {
     val perf = state.perf
     val s = perf.all
@@ -70,6 +72,9 @@ fun JournalScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        item {
+            com.saeidkazemi.trader.ui.components.BacktestCard(state, onRun = onRunBacktest, onToggle = onToggleBacktest)
+        }
         item { SectionTitle("پنل سودآوری") }
         item {
             Card {
