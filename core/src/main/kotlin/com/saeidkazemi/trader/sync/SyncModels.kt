@@ -49,14 +49,16 @@ data class SyncSnapshot(
     val activity: List<MarketActivity>? = null,
     val notes: List<String>? = null,
     val lastCycleAt: Long = 0L,
-    val results: List<SyncResult>? = null
+    val results: List<SyncResult>? = null,
+    /** خلاصه خودارزیابی دستگاه اصلی (کجا درست، کجا غلط). */
+    val review: com.saeidkazemi.trader.review.ReviewSummary? = null
 )
 
 /** فرمانی که آینه برای دستگاه اصلی می‌فرستد. */
 data class SyncCommand(
     val id: String = "",
     val at: Long = 0L,
-    /** settings | allocations | capital | reset | buy | sell | backtest | refresh */
+    /** settings | allocations | capital | reset | buy | sell | backtest | refresh | report */
     val type: String = "",
     val args: Map<String, String>? = null,
     /** برای type=settings: فقط فیلدهای تغییرکرده تنظیمات (JSON). */
@@ -69,7 +71,9 @@ data class SyncResult(
     val id: String = "",
     val at: Long = 0L,
     val ok: Boolean = true,
-    val message: String = ""
+    val message: String = "",
+    /** داده همراه (مثلاً متن گزارش خودارزیابی)؛ در فهرست نتیجه‌های وضعیت ذخیره نمی‌شود. */
+    val data: String? = null
 )
 
 /** وضعیت اتصال برای نمایش در برنامه. */

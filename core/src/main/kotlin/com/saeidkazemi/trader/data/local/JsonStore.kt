@@ -104,6 +104,11 @@ class JsonStore(private val dir: File) {
         write("journal.json", JournalFile(entries))
     }
 
+    /** فایل‌های کمکی (مثل ثبت پیش‌بینی‌ها و مشکلات برای گزارش خودارزیابی). */
+    fun <T> loadFile(name: String, type: Class<T>): T? = read(name, type)
+
+    fun saveFile(name: String, obj: Any) = write(name, obj)
+
     private fun <T> parse(f: File, type: Class<T>): T? =
         try {
             if (!f.exists() || f.length() == 0L) null else gson.fromJson(f.readText(Charsets.UTF_8), type)

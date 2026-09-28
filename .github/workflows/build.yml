@@ -110,7 +110,7 @@ jobs:
           if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(update |sync |screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(review (lan|report|upload|synth|ERROR)|sync (lan |relay ok|ERROR)|screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 9 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
       - name: Publish trend screenshots as git blobs (for review via API)
         if: always()
@@ -119,8 +119,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          foreach ($n in @("15-sync")) {
-            $f = "selftest/$n.png"
+          foreach ($n in @("16-review", "6-settings", "selftest.txt")) {
+            $f = if ($n.EndsWith(".txt")) { "selftest/$n" } else { "selftest/$n.png" }
             if (Test-Path $f) {
               $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f))
               $body = @{ content = $b64; encoding = "base64" } | ConvertTo-Json

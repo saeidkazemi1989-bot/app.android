@@ -119,7 +119,8 @@ fun AppRoot(
                     "portfolio" -> PortfolioScreen(state = state, onSell = controller::manualSell, onOpenAsset = openAsset)
                     "journal" -> JournalScreen(
                         state = state, onToast = controller::toast, onOpenAsset = openAsset,
-                        onRunBacktest = controller::runBacktest, onToggleBacktest = controller::setUseBacktest
+                        onRunBacktest = controller::runBacktest, onToggleBacktest = controller::setUseBacktest,
+                        vm = controller
                     )
                     "settings" -> SettingsScreen(state = state, vm = controller)
                     else -> DashboardScreen(

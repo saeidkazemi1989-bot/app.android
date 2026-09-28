@@ -787,8 +787,96 @@ class TradeEngine(
         lastActivity = activity
     }
 
+    /** دفتر خودارزیابی (پیش‌بینی‌ها و مشکلات)؛ در AppContainer تنظیم می‌شود. */
+    var review: com.saeidkazemi.trader.review.ReviewLog? = null
+
+    /** ثبت پیش‌بینی‌ها، نتیجه پیش‌بینی‌های قبلی و مشکلات این دور برای گزارش خودارزیابی. */
+    private fun recordReview(
+        rl: com.saeidkazemi.trader.review.ReviewLog,
+        cycleStart: Long,
+        trigger: String,
+        settings: AppSettings,
+        assets: List<Asset>,
+        signals: List<Signal>,
+        histories: Map<String, List<PricePoint>>,
+        notes: List<String>,
+        buys: Int,
+        sells: Int
+    ) {
+        val now = System.currentTimeMillis()
+        val irOpen = IranMarket.isOpen(now)
+        val native = HashMap<String, Double>()
+        for (a in assets) if (!a.isSimulated && a.price.isFinite() && a.price > 0) native[a.id] = a.price
+        rl.evaluate(native, irOpen, now)
+        val held = broker.account().positions.map { it.assetId }.toSet()
+        val assetMap = assets.associateBy { it.id }
+        val real = signals.filter { !it.isSimulated }
+        val pick = LinkedHashSet<String>()
+        for (m in MarketKind.values()) {
+            val ms = real.filter { it.market == m }.sortedByDescending { it.score }
+            if (m == MarketKind.IR_STOCK) {
+                ms.take(30).forEach { pick.add(it.assetId) }
+                ms.takeLast(10).forEach { pick.add(it.assetId) }
+            } else ms.forEach { pick.add(it.assetId) }
+        }
+        real.filter { it.assetId in held }.forEach { pick.add(it.assetId) }
+        val sigMap = real.associateBy { it.assetId }
+        val items = ArrayList<com.saeidkazemi.trader.review.Prediction>()
+        for (id in pick) {
+            val sig = sigMap[id] ?: continue
+            val asset = assetMap[id] ?: continue
+            if (asset.isSimulated || asset.price <= 0 || !asset.price.isFinite()) continue
+            if (asset.market == MarketKind.IR_STOCK && !irOpen) continue
+            if (now - rl.lastPredictionAt(id) < com.saeidkazemi.trader.review.ReviewLog.PREDICTION_GAP_MS) continue
+            val fc = try {
+                com.saeidkazemi.trader.analysis.Forecast.build(histories[id].orEmpty(), asset.price, now, sig.score, false)
+            } catch (_: Exception) { null }
+            val factors = sig.proFactors.filter { it.impact != 0 }
+                .sortedByDescending { kotlin.math.abs(it.impact) }.take(6)
+                .associate { it.title to it.impact }
+            items.add(
+                com.saeidkazemi.trader.review.Prediction(
+                    ts = now,
+                    assetId = id,
+                    symbol = asset.symbol,
+                    market = asset.market.name,
+                    price = asset.price,
+                    score = sig.score,
+                    tech = sig.technicalScore,
+                    news = sig.newsAdj,
+                    pro = sig.proAdj,
+                    th = settings.buyThreshold + planFor(settings, asset.market).buyThresholdDelta,
+                    sellTh = settings.sellThreshold,
+                    action = sig.action.name,
+                    fcExp = fc?.expectedPct?.takeIf { it.isFinite() },
+                    fcUp = fc?.probUp?.takeIf { it.isFinite() },
+                    factors = factors.ifEmpty { null },
+                    held = id in held
+                )
+            )
+        }
+        rl.record(items)
+        val problems = rl.ingestNotes(notes)
+        store.lastWriteError?.let { rl.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_STORAGE, "خطای ذخیره فایل: $it", now) }
+        val realBy = HashMap<String, Int>()
+        val simBy = HashMap<String, Int>()
+        for (a in assets) {
+            if (a.isDisplayOnly) continue
+            val map = if (a.isSimulated) simBy else realBy
+            map[a.market.name] = (map[a.market.name] ?: 0) + 1
+        }
+        rl.cycle(
+            com.saeidkazemi.trader.review.CycleDiag(
+                ts = now, trigger = trigger, ms = now - cycleStart, assets = assets.size,
+                real = realBy, sim = simBy, signals = signals.size, buys = buys, sells = sells, problems = problems
+            )
+        )
+        rl.maybeSave()
+    }
+
     suspend fun runCycle(trigger: String): CycleReport = mutex.withLock {
         val manage = !followerMode
+        val cycleStart = System.currentTimeMillis()
         if (manage) ensureJournal()
         val buys = mutableListOf<String>()
         val sells = mutableListOf<String>()
@@ -1142,6 +1230,13 @@ class TradeEngine(
         }
         tracker.record(broker.account().positions, priceMap)
         if (manage) maybeStartBacktest()
+        val rl = review
+        if (manage && rl != null) {
+            try {
+                recordReview(rl, cycleStart, trigger, settings, assets, signals, histories, notes.distinct(), buys.size, sells.size)
+            } catch (_: Exception) {
+            }
+        }
         val report = CycleReport(
             ts = System.currentTimeMillis(),
             trigger = trigger,

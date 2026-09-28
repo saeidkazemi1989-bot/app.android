@@ -68,6 +68,12 @@ data class UiState(
     val sync: com.saeidkazemi.trader.sync.SyncStatus = com.saeidkazemi.trader.sync.SyncStatus(),
     /** به‌روزرسانی داخل برنامه. */
     val appUpdate: com.saeidkazemi.trader.update.UpdateState = com.saeidkazemi.trader.update.UpdateState(),
+    /** خودارزیابی ربات: کجا درست فکر کرد، کجا اشتباه. */
+    val review: com.saeidkazemi.trader.review.ReviewSummary? = null,
+    /** آخرین کد گزارش آنلاین (برای فرستادن به تحلیلگر). */
+    val reportCode: String = "",
+    val reportCodeAt: Long = 0L,
+    val reportBusy: Boolean = false,
     val loading: Boolean = false,
     val refreshing: Boolean = false,
     val error: String? = null,

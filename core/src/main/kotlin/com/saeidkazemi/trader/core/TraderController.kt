@@ -52,6 +52,12 @@ class TraderController(
 
         /** اجرای نصب‌کننده؛ خروجی: پیام برای کاربر (یا null اگر نیازی به پیام نیست). */
         fun launchInstaller(file: java.io.File): String? = "نصب خودکار در این نسخه پشتیبانی نمی‌شود."
+
+        /**
+         * ذخیره/اشتراک فایل گزارش خودارزیابی (اندروید: پنجره اشتراک‌گذاری، ویندوز: ذخیره روی دسکتاپ)؛
+         * خروجی: پیام برای کاربر، یا null اگر این نسخه پشتیبانی نمی‌کند.
+         */
+        fun shareReport(fileName: String, text: String): String? = null
     }
 
     private val _state = MutableStateFlow(UiState(platform = hooks.platformInfo()))
@@ -76,7 +82,10 @@ class TraderController(
         scope.launch(Dispatchers.IO) {
             container.sync.events.collect { ev ->
                 if (ev == "data") syncFromEngine(null)
-                else if (ev.startsWith("msg:")) toast(ev.removePrefix("msg:"))
+                else if (ev.startsWith("msg:")) {
+                    captureCode(ev)
+                    toast(ev.removePrefix("msg:"))
+                }
             }
         }
         scope.launch(Dispatchers.IO) {
@@ -187,8 +196,96 @@ class TraderController(
                 activity = container.tradeEngine.lastActivity,
                 backtest = container.tradeEngine.backtest,
                 backtestRunning = container.tradeEngine.backtestRunning,
-                backtestProgress = container.tradeEngine.backtestProgress
+                backtestProgress = container.tradeEngine.backtestProgress,
+                review = reviewSummary(false) ?: it.review
             )
+        }
+    }
+
+    // ---- خودارزیابی (کجا درست فکر کردم، کجا اشتباه) ----
+
+    private fun reviewSummary(force: Boolean): com.saeidkazemi.trader.review.ReviewSummary? = try {
+        if (container.sync.isFollower) container.sync.mirror?.review
+        else com.saeidkazemi.trader.review.ReviewReport.cachedSummary(container, force = force)
+    } catch (_: Exception) {
+        null
+    }
+
+    fun refreshReview() {
+        scope.launch(Dispatchers.IO) {
+            val r = reviewSummary(true)
+            _state.update { it.copy(review = r ?: it.review) }
+        }
+    }
+
+    /** متن کامل گزارش؛ در حالت آینه از دستگاه اصلی گرفته می‌شود. خروجی: (متن یا null، پیام). */
+    private suspend fun reportText(online: Boolean): Pair<String?, String?> {
+        if (container.sync.isFollower) {
+            val r = container.sync.requestReport(online)
+            return if (online) (null to r.message) else (r.data to (if (r.data == null) r.message else null))
+        }
+        return com.saeidkazemi.trader.review.ReviewReport.build(container, hooks.platformInfo().name) to null
+    }
+
+    private val codeRegex = Regex("کد گزارش: ([A-Z0-9]{4}-[A-Z0-9]{4})")
+
+    /** اگر پیام (مثلاً از دستگاه اصلی) کد گزارش داشت، نگه داشته می‌شود تا در کارت خودارزیابی دیده شود. */
+    private fun captureCode(msg: String) {
+        codeRegex.find(msg)?.let { m -> _state.update { it.copy(reportCode = m.groupValues[1], reportCodeAt = System.currentTimeMillis()) } }
+    }
+
+    /** ارسال آنلاین گزارش برای تحلیلگر؛ یک کد کوتاه برمی‌گرداند که باید برای تحلیلگر فرستاده شود. */
+    fun sendReportOnline() {
+        if (_state.value.reportBusy) return
+        scope.launch(Dispatchers.IO) {
+            _state.update { it.copy(reportBusy = true) }
+            try {
+                val (text, msg) = reportText(online = true)
+                if (text != null) {
+                    val code = com.saeidkazemi.trader.review.ReportUploader.upload(text)
+                    _state.update { it.copy(reportCode = code, reportCodeAt = System.currentTimeMillis()) }
+                    toast("گزارش ارسال شد. کد گزارش: " + code + " — این کد را برای تحلیلگر بفرستید (تا حدود ۱۲ ساعت قابل خواندن است).")
+                } else if (msg != null) {
+                    captureCode(msg)
+                    toast(msg)
+                }
+            } catch (e: Exception) {
+                container.review.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_SYNC, "ارسال آنلاین گزارش ناموفق بود: " + (e.message ?: ""))
+                toast("ارسال آنلاین ممکن نشد (شاید سرویس ntfy.sh فیلتر است؛ با فیلترشکن امتحان کنید یا دکمه «فایل گزارش» را بزنید): " + (e.message ?: ""))
+            } finally {
+                _state.update { it.copy(reportBusy = false) }
+            }
+        }
+    }
+
+    /** ساخت فایل گزارش و اشتراک/ذخیره آن. */
+    fun shareReport() {
+        if (_state.value.reportBusy) return
+        scope.launch(Dispatchers.IO) {
+            _state.update { it.copy(reportBusy = true) }
+            try {
+                val (text, msg) = reportText(online = false)
+                if (text == null) {
+                    toast(msg ?: "ساخت گزارش ممکن نشد.")
+                    return@launch
+                }
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+                val res = hooks.shareReport("MoameleYar-report-$stamp.txt", text)
+                toast(res ?: "اشتراک فایل در این نسخه پشتیبانی نمی‌شود؛ از «کپی خلاصه» استفاده کنید.")
+            } catch (e: Exception) {
+                toast("ساخت گزارش ناموفق بود: " + (e.message ?: ""))
+            } finally {
+                _state.update { it.copy(reportBusy = false) }
+            }
+        }
+    }
+
+    /** متن کوتاه گزارش (بدون JSON) برای کپی؛ در حالت آینه اگر دستگاه اصلی در دسترس نباشد null. */
+    suspend fun reportShortText(): String? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        try {
+            reportText(online = false).first?.let { com.saeidkazemi.trader.review.ReviewReport.shortText(it) }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -273,6 +370,7 @@ class TraderController(
                 if (msg != null) toast(msg)
             } catch (e: Exception) {
                 _update.value = _update.value.copy(progress = null, installing = false, error = e.message)
+                container.review.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_UPDATE, "نصب نسخه جدید ناموفق بود: " + (e.message ?: ""))
                 toast("به‌روزرسانی ناموفق بود: " + (e.message ?: ""))
             }
         }

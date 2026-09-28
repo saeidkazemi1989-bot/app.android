@@ -239,7 +239,8 @@ class SyncManager(private val container: AppContainer) {
             activity = engine.lastActivity,
             notes = lastNotes,
             lastCycleAt = lastCycleAt,
-            results = res
+            results = res,
+            review = try { com.saeidkazemi.trader.review.ReviewReport.cachedSummary(container) } catch (_: Exception) { null }
         )
         val hash = SyncCrypto.hex(SyncCrypto.sha256(gson.toJson(base).toByteArray())).take(24)
         return base.copy(hash = hash, createdAt = System.currentTimeMillis())
@@ -290,6 +291,7 @@ class SyncManager(private val container: AppContainer) {
                     if (message.startsWith("اینترنت")) message = ""
                 } catch (e: Exception) {
                     message = "اینترنت (سرور واسط) در دسترس نیست: " + (e.message ?: "")
+                    container.review.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_SYNC, "سرور واسط اینترنتی در دسترس نبود: " + (e.message ?: ""))
                 }
             }
             connected = System.currentTimeMillis() - lastPeerSeenAt < 90_000
@@ -357,18 +359,31 @@ class SyncManager(private val container: AppContainer) {
             while (seen.size > 300) seen.remove(seen.keys.first())
         }
         val r = try {
-            val (ok, msg) = execute(cmd)
-            SyncResult(cmd.id, now, ok, msg)
+            if (cmd.type == "report") report(cmd, now)
+            else {
+                val (ok, msg) = execute(cmd)
+                SyncResult(cmd.id, now, ok, msg)
+            }
         } catch (e: Exception) {
             SyncResult(cmd.id, now, false, "اجرای فرمان روی دستگاه اصلی ناموفق بود: " + (e.message ?: ""))
         }
         synchronized(results) {
-            results.addLast(r)
+            results.addLast(r.copy(data = null))
             while (results.size > 15) results.removeFirst()
         }
         _events.tryEmit("data")
         _events.tryEmit("msg:" + (if (cmd.from.isNotEmpty()) "از " + cmd.from + ": " else "از دستگاه متصل: ") + r.message)
         return r
+    }
+
+    /** گزارش خودارزیابی روی دستگاه اصلی (که داده‌ها و پیش‌بینی‌ها را دارد) ساخته می‌شود. */
+    private fun report(cmd: SyncCommand, now: Long): SyncResult {
+        val text = com.saeidkazemi.trader.review.ReviewReport.build(container, cfg.deviceName.ifEmpty { "دستگاه اصلی" } + " (دستگاه اصلی)")
+        if (cmd.args?.get("online") == "1") {
+            val code = com.saeidkazemi.trader.review.ReportUploader.upload(text)
+            return SyncResult(cmd.id, now, true, "گزارش خودارزیابی دستگاه اصلی آنلاین ارسال شد. کد گزارش: " + code + " — این کد را برای تحلیلگر بفرستید.", code)
+        }
+        return SyncResult(cmd.id, now, true, "گزارش خودارزیابی دستگاه اصلی آماده شد.", text)
     }
 
     private suspend fun execute(cmd: SyncCommand): Pair<Boolean, String> {
@@ -619,6 +634,46 @@ class SyncManager(private val container: AppContainer) {
             if (a.get(k) != v) patch.add(k, v)
         }
         return if (patch.size() == 0) null else patch.toString()
+    }
+
+    /**
+     * درخواست گزارش خودارزیابی از دستگاه اصلی. در شبکه محلی متن کامل برمی‌گردد (data)؛ از طریق اینترنت،
+     * دستگاه اصلی خودش گزارش را آنلاین می‌فرستد و کد آن در پیام نتیجه اعلام می‌شود.
+     */
+    suspend fun requestReport(online: Boolean): SyncResult {
+        val cr = crypto ?: return SyncResult(ok = false, message = "کد اتصال تنظیم نشده است.")
+        val c = cfg
+        val cmd = SyncCommand(UUID.randomUUID().toString(), System.currentTimeMillis(), "report", mapOf("online" to if (online) "1" else "0"), null, c.deviceName)
+        if (c.lanEnabled && c.lastHost.isNotEmpty()) {
+            try {
+                val slow = http.newBuilder().readTimeout(if (online) 180 else 60, TimeUnit.SECONDS).build()
+                val req = Request.Builder()
+                    .url("http://" + c.lastHost + "/my/cmd")
+                    .post(cr.seal(gson.toJson(cmd).toByteArray()).toRequestBody("application/octet-stream".toMediaType()))
+                    .build()
+                val res = slow.newCall(req).execute().use { r ->
+                    if (r.code != 200) null
+                    else cr.open(r.body?.bytes() ?: ByteArray(0))?.let { gson.fromJson(String(it, Charsets.UTF_8), SyncResult::class.java) }
+                }
+                if (res != null) return res
+            } catch (_: Exception) {
+            }
+        }
+        if (c.relayEnabled) {
+            return try {
+                val cmd2 = cmd.copy(args = mapOf("online" to "1"))
+                Relay(c.relayUrl).publishText(cr.topic + "c", Base64.getEncoder().encodeToString(cr.seal(gson.toJson(cmd2).toByteArray())))
+                pending[cmd2.id] = System.currentTimeMillis()
+                lastRelayHelloAt = System.currentTimeMillis()
+                lastRelayPollAt = System.currentTimeMillis() - RELAY_POLL_MS + 30_000
+                publishStatus()
+                SyncResult(cmd2.id, System.currentTimeMillis(), true,
+                    "دستگاه اصلی در شبکه محلی نبود؛ درخواست از طریق اینترنت فرستاده شد. دستگاه اصلی ظرف چند دقیقه گزارش را آنلاین می‌فرستد و کد گزارش همین‌جا اعلام می‌شود.")
+            } catch (e: Exception) {
+                SyncResult(ok = false, message = "دستگاه اصلی در دسترس نیست (نه در شبکه محلی، نه از طریق اینترنت).")
+            }
+        }
+        return SyncResult(ok = false, message = "دستگاه اصلی در شبکه محلی در دسترس نیست.")
     }
 
     /** ارسال فرمان به دستگاه اصلی؛ خروجی: پیام قابل نمایش. */

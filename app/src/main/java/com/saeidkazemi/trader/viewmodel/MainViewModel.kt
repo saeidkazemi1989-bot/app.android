@@ -54,6 +54,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             override val updateKind: String get() = "apk"
 
+            override fun shareReport(fileName: String, text: String): String? {
+                return try {
+                    val dir = java.io.File(app.cacheDir, "reports").apply { mkdirs() }
+                    dir.listFiles()?.forEach { if (it.name != fileName) it.delete() }
+                    val file = java.io.File(dir, fileName)
+                    file.writeText(text, Charsets.UTF_8)
+                    val uri = androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".updates", file)
+                    val send = Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .putExtra(Intent.EXTRA_SUBJECT, "گزارش خودارزیابی معامله‌یار")
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    app.startActivity(
+                        Intent.createChooser(send, "ارسال گزارش برای تحلیل")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    )
+                    "فایل گزارش ساخته شد (" + (file.length() / 1024) + " کیلوبایت)؛ از پنجره باز شده آن را ذخیره کنید یا برای تحلیلگر بفرستید."
+                } catch (e: Exception) {
+                    "ساخت فایل گزارش ممکن نشد: " + (e.message ?: "")
+                }
+            }
+
             override fun launchInstaller(file: java.io.File): String? {
                 return try {
                     if (!app.packageManager.canRequestPackageInstalls()) {

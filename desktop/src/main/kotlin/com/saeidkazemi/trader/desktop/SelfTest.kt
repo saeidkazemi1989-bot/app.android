@@ -326,6 +326,14 @@ fun runSelfTest(outDir: File): Int {
             val pm = runBlocking { f.sync.send("settings", mapOf("msg" to "ok"), patch) }
             out("sync lan-settings patch=$patch hostTrigger=${host.store.loadSettings().profitLockTriggerPct} hostSound=${host.store.loadSettings().soundAlerts} msg=$pm")
 
+            // گزارش خودارزیابی دستگاه اصلی از طریق شبکه محلی
+            try {
+                val rr = runBlocking { f.sync.requestReport(false) }
+                out("review lan-report ok=${rr.ok} len=${rr.data?.length} msg=${rr.message.take(80)}")
+            } catch (e: Throwable) {
+                out("review lan-report ERROR $e")
+            }
+
             // مسیر اینترنتی (ntfy)
             host.sync.setLan(false)
             f.sync.setLan(false)
@@ -351,6 +359,59 @@ fun runSelfTest(outDir: File): Int {
             host.sync.setLan(true)
         } catch (e: Throwable) {
             out("sync ERROR $e")
+        }
+        // ---- خودارزیابی: داده واقعی همین اجرا + داده ساختگی برای آزمون تحلیل ----
+        var synthSummary: com.saeidkazemi.trader.review.ReviewSummary? = null
+        try {
+            val rl = container.review
+            out("review real preds=${rl.predictions().size} cycles=${rl.cycles().size} issues=${rl.issues().size} " +
+                rl.issues().take(3).joinToString(" | ") { it.area + ":" + it.message.take(60) })
+            val text = com.saeidkazemi.trader.review.ReviewReport.build(container, "selftest")
+            val heads = text.lines().filter { it.startsWith("## ") }.map { it.removePrefix("## ").take(18) }
+            out("review report len=${text.length} bytes=${text.toByteArray().size} parts=${com.saeidkazemi.trader.review.ReportUploader.split(text).size} sections=${heads.size}")
+            try {
+                val code = com.saeidkazemi.trader.review.ReportUploader.upload(text)
+                out("review upload code=$code url=${com.saeidkazemi.trader.review.ReportUploader.readUrl(code)}")
+            } catch (e: Throwable) {
+                out("review upload ERROR $e")
+            }
+            // داده ساختگی: «جریان پول» واقعاً پیش‌بینی‌کننده است، «ترس و طمع» برعکس
+            val tmp = java.nio.file.Files.createTempDirectory("myr-review").toFile()
+            val sc = AppContainer(tmp)
+            val rnd = java.util.Random(7)
+            val now = System.currentTimeMillis()
+            val list = ArrayList<com.saeidkazemi.trader.review.Prediction>()
+            for (i in 0 until 400) {
+                val ts = now - 80 * 3_600_000L - (i / 20) * 6 * 3_600_000L
+                val flow = if (rnd.nextBoolean()) 6 else -6
+                val fg = if (rnd.nextBoolean()) 4 else -4
+                val score = 50 + flow + fg + rnd.nextInt(30) - 10
+                val r1 = flow * 0.4 - fg * 0.3 + rnd.nextGaussian() * 2
+                val r3 = r1 * 1.5 + rnd.nextGaussian() * 2
+                list.add(
+                    com.saeidkazemi.trader.review.Prediction(
+                        ts = ts, assetId = "a" + (i % 20), symbol = "S" + (i % 20), market = "CRYPTO", price = 100.0,
+                        score = score, tech = score - flow - fg, news = 0, pro = flow + fg, th = 60, sellTh = 45, action = "HOLD",
+                        fcExp = r1 * 0.2, fcUp = 0.62, factors = mapOf("جریان پول" to flow, "ترس و طمع" to fg),
+                        p1 = 100 * (1 + r1 / 100), p3 = 100 * (1 + r3 / 100), hi3 = 100 * (1 + maxOf(r1, r3, 0.0) / 100 + 0.01), lo3 = 100 * (1 + minOf(r1, r3, 0.0) / 100 - 0.01),
+                        done1 = true, done3 = true
+                    )
+                )
+            }
+            sc.review.record(list)
+            sc.review.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_DATA, "داده بورس دریافت نشد (آزمون)")
+            val sum = com.saeidkazemi.trader.review.ReviewReport.summary(sc)
+            synthSummary = sum
+            out("review synth buyN1=${sum.buyN1} hit=${com.saeidkazemi.trader.review.SelfReview.pc(sum.buyHit1)} excess=${com.saeidkazemi.trader.review.SelfReview.sp(sum.buyExcess1)} findings=${sum.findings?.size}")
+            sum.findings.orEmpty().take(6).forEach { f -> out("review finding good=${f.good} sev=${f.severity} ${f.title.take(70)}") }
+        } catch (e: Throwable) {
+            out("review ERROR $e")
+        }
+        synthSummary?.let { sm ->
+            shot("16-review", 760, 1500) {
+                val s by controller.state.collectAsState()
+                com.saeidkazemi.trader.ui.components.ReviewCard(s.copy(review = sm, reportCode = "ABCD-2345"), controller)
+            }
         }
         followerForShot?.let { fc ->
             shot("15-sync", 760, 1500) {

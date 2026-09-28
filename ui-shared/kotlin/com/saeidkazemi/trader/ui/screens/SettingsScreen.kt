@@ -105,6 +105,10 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                 onInstall = vm::installUpdate, onCheck = { vm.checkUpdate(true) }
             )
         }
+        // خودارزیابی و گزارش برای تحلیلگر
+        item {
+            com.saeidkazemi.trader.ui.components.ReviewCard(state, vm)
+        }
         // اتصال اندروید و ویندوز
         item {
             com.saeidkazemi.trader.ui.components.SyncSettingsCard(state.sync, state.platform.isDesktop, vm)

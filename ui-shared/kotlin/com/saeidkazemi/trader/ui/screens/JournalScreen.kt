@@ -52,7 +52,8 @@ fun JournalScreen(
     onToast: (String) -> Unit,
     onOpenAsset: (String) -> Unit,
     onRunBacktest: (() -> Unit)? = null,
-    onToggleBacktest: ((Boolean) -> Unit)? = null
+    onToggleBacktest: ((Boolean) -> Unit)? = null,
+    vm: com.saeidkazemi.trader.core.TraderController? = null
 ) {
     val perf = state.perf
     val s = perf.all
@@ -72,6 +73,9 @@ fun JournalScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        if (vm != null) item {
+            com.saeidkazemi.trader.ui.components.ReviewCard(state, vm)
+        }
         item {
             com.saeidkazemi.trader.ui.components.BacktestCard(state, onRun = onRunBacktest, onToggle = onToggleBacktest)
         }

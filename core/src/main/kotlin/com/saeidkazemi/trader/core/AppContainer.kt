@@ -35,6 +35,13 @@ class AppContainer(dataDir: File) {
         news = newsService
     )
 
+    /** دفتر خودارزیابی: پیش‌بینی‌ها، مشکلات و دورهای بررسی برای گزارش «کجا درست، کجا غلط». */
+    val review = com.saeidkazemi.trader.review.ReviewLog(store)
+
+    init {
+        tradeEngine.review = review
+    }
+
     /** اتصال اندروید و ویندوز (دستگاه اصلی / آینه). */
     val sync = com.saeidkazemi.trader.sync.SyncManager(this)
 

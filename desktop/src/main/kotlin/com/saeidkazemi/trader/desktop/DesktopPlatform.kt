@@ -131,6 +131,23 @@ class DesktopHooks(private val notifier: TrayNotifier) : TraderController.Platfo
 
     override fun setAutostart(on: Boolean): Boolean = WindowsAutostart.set(on)
 
+    /** گزارش خودارزیابی روی دسکتاپ ذخیره و پوشه‌اش باز می‌شود. */
+    override fun shareReport(fileName: String, text: String): String? {
+        return try {
+            val home = File(System.getProperty("user.home"))
+            val dir = listOf(File(home, "Desktop"), File(home, "OneDrive/Desktop"), File(home, "Documents"))
+                .firstOrNull { it.isDirectory } ?: File(DesktopPaths.dataDir(), "reports").apply { mkdirs() }
+            val file = File(dir, fileName)
+            file.writeText(text, Charsets.UTF_8)
+            if (WindowsAutostart.isWindows) {
+                try { ProcessBuilder("explorer.exe", "/select,", file.absolutePath).start() } catch (_: Exception) { }
+            }
+            "فایل گزارش (" + (file.length() / 1024) + " کیلوبایت) ذخیره شد: " + file.absolutePath + " — همین فایل را برای تحلیلگر بفرستید."
+        } catch (e: Exception) {
+            "ذخیره فایل گزارش ممکن نشد: " + (e.message ?: "")
+        }
+    }
+
     override fun updateDir(): File? = if (WindowsAutostart.isWindows) File(DesktopPaths.dataDir(), "updates") else null
 
     override val updateKind: String get() = "msi"
