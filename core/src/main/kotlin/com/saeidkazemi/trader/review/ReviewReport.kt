@@ -32,7 +32,8 @@ object ReviewReport {
         for (a in c.tradeEngine.lastActivity) {
             if ((settings.allocations[a.market.name] ?: 0.0) <= 0) continue
             val last = a.lastTradeAt ?: 0L
-            if (a.positions == 0 && (last == 0L || now - last > 3 * ReviewLog.H24)) {
+            val observed = now - c.review.since() > 3 * ReviewLog.H24
+            if (a.positions == 0 && observed && (last == 0L || now - last > 3 * ReviewLog.H24)) {
                 out.add(Finding(false, 1, "بازار " + a.market.faTitle + " چند روز است معامله نکرده",
                     a.status + (a.bestSymbol?.let { " (بهترین: $it با امتیاز " + a.bestScore + "، آستانه " + a.threshold + ")" } ?: ""),
                     "آستانه/فیلتر این بازار بررسی شود؛ اگر بازار نزولی است این رفتار درست است."))

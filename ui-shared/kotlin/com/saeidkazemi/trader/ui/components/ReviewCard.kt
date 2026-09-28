@@ -69,7 +69,8 @@ fun ReviewCard(state: UiState, vm: TraderController) {
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) {
-        Text("خودارزیابی ربات: کجا درست فکر کردم، کجا اشتباه", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        val onS = MaterialTheme.colorScheme.onSurface
+        Text("خودارزیابی ربات: کجا درست فکر کردم، کجا اشتباه", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = onS)
         Text(
             "هر دارایی که تحلیل می‌شود، امتیاز و دلایلش ثبت و ۲۴ و ۷۲ ساعت بعد با قیمت واقعی مقایسه می‌شود؛ معاملات بسته هم کالبدشکافی می‌شوند. " +
                 "گزارش کامل را برای تحلیلگر بفرستید تا ایرادها در نسخه بعد رفع شوند.",
@@ -91,7 +92,7 @@ fun ReviewCard(state: UiState, vm: TraderController) {
             if (r.sellN1 > 0) lines.add("سیگنال‌های فروش: " + SelfReview.pc(r.sellHit1) + " از " + r.sellN1 + " مورد ۲۴ ساعت بعد پایین‌تر بودند.")
             if (r.closedTrades > 0) lines.add("معاملات بسته: " + r.rightTrades + " از " + r.closedTrades + " درست (سودده).")
             lines.add("پیش‌بینی ثبت‌شده: " + r.predictions + " • ارزیابی‌شده: " + r.evaluated1 + " (۲۴س) / " + r.evaluated3 + " (۷۲س) • مشکل فنی: " + r.issues)
-            lines.forEach { Text(it, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp)) }
+            lines.forEach { Text(it, fontSize = 12.sp, lineHeight = 19.sp, color = onS, modifier = Modifier.padding(top = 6.dp)) }
             val fl = r.findings.orEmpty()
             val shown = if (expanded) fl else fl.filter { it.good != null }.take(5)
             shown.forEach { FindingRow(it) }
