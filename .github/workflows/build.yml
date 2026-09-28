@@ -110,7 +110,7 @@ jobs:
           if (Test-Path "$dir/selftest.txt") { Get-Content "$dir/selftest.txt" -Encoding UTF8 } else { Write-Host "::warning::no selftest output" }
           Write-Host "===== SELFTEST END ====="
           if (Test-Path "$dir/selftest.txt") {
-            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(sync |screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
+            Get-Content "$dir/selftest.txt" -Encoding UTF8 | Select-String -Pattern "^(update |sync |screenshot .*FAILED|SELFTEST CRASH)" | Select-Object -First 10 | ForEach-Object { Write-Host "::notice::$($_.Line)" }
           }
       - name: Publish trend screenshots as git blobs (for review via API)
         if: always()
@@ -144,8 +144,44 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - uses: actions/checkout@v4
+        with:
+          path: src
       - name: List files
         run: ls -R dist
+      - name: Write version.json (in-app update)
+        run: |
+          python3 - <<'PY'
+          import json, re, hashlib, os, datetime
+          av = open('src/core/src/main/kotlin/com/saeidkazemi/trader/core/AppVersion.kt', encoding='utf-8').read()
+          name = re.search(r'NAME\s*=\s*"([^"]+)"', av).group(1)
+          code = int(re.search(r'CODE\s*=\s*(\d+)', av).group(1))
+          notes = ''
+          if os.path.exists('src/release-notes.txt'):
+              notes = open('src/release-notes.txt', encoding='utf-8').read().strip()
+          def sha(p):
+              if not os.path.exists(p): return ''
+              h = hashlib.sha256()
+              with open(p, 'rb') as f:
+                  for b in iter(lambda: f.read(1 << 20), b''): h.update(b)
+              return h.hexdigest()
+          base = 'https://github.com/${{ github.repository }}/releases/download/latest-build/'
+          apk = 'dist/MoameleYar-android-apk/MoameleYar-android.apk'
+          msi = 'dist/MoameleYar-windows/MoameleYar-windows-setup.msi'
+          v = {
+              'name': name, 'code': code, 'notes': notes,
+              'apk': base + 'MoameleYar-android.apk', 'apkSha256': sha(apk),
+              'msi': base + 'MoameleYar-windows-setup.msi', 'msiSha256': sha(msi),
+              'builtAt': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'commit': '${{ github.sha }}',
+          }
+          os.makedirs('dist/meta', exist_ok=True)
+          with open('dist/meta/version.json', 'w', encoding='utf-8') as f:
+              json.dump(v, f, ensure_ascii=False, indent=1)
+          print(json.dumps(v, ensure_ascii=False, indent=1))
+          if not v['apkSha256'] or not v['msiSha256']:
+              print('::warning::version.json: missing apk or msi file')
+          PY
       - name: Remove previous rolling release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,3 +204,4 @@ jobs:
           files: |
             dist/MoameleYar-windows/*
             dist/MoameleYar-android-apk/*
+            dist/meta/version.json

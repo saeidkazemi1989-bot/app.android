@@ -43,6 +43,15 @@ class TraderController(
 
         /** باز کردن تنظیمات برنامه در سیستم (برای اجرای خودکار/باتری در گوشی‌های شیائومی، هواوی، …). */
         fun openAppSettings() {}
+
+        /** پوشه دانلود فایل به‌روزرسانی؛ null یعنی این نسخه به‌روزرسانی داخلی ندارد. */
+        fun updateDir(): java.io.File? = null
+
+        /** نوع فایل نصب این پلتفرم: "apk" یا "msi". */
+        val updateKind: String get() = ""
+
+        /** اجرای نصب‌کننده؛ خروجی: پیام برای کاربر (یا null اگر نیازی به پیام نیست). */
+        fun launchInstaller(file: java.io.File): String? = "نصب خودکار در این نسخه پشتیبانی نمی‌شود."
     }
 
     private val _state = MutableStateFlow(UiState(platform = hooks.platformInfo()))
@@ -50,6 +59,10 @@ class TraderController(
 
     private var started = false
     private var loopJob: Job? = null
+
+    /** وضعیت به‌روزرسانی داخل برنامه. */
+    private val _update = MutableStateFlow(com.saeidkazemi.trader.update.UpdateState())
+    val updateState: StateFlow<com.saeidkazemi.trader.update.UpdateState> = _update
 
     fun start() {
         if (started) return
@@ -75,6 +88,16 @@ class TraderController(
             announceUpdate(settings, account)
             if (settings.autoTrade) hooks.onAutoTradeChanged(true)
             runCycleInternal("initial")
+        }
+        // بررسی خودکار نسخه جدید: کمی بعد از شروع و بعد هر ۶ ساعت
+        _update.value = _update.value.copy(supported = hooks.updateDir() != null)
+        scope.launch(Dispatchers.IO) { _update.collect { u -> _state.update { it.copy(appUpdate = u) } } }
+        scope.launch(Dispatchers.IO) {
+            delay(20_000)
+            while (isActive) {
+                checkUpdate(manual = false)
+                delay(6 * 3600_000L)
+            }
         }
         if (hooks.runsOwnLoop) {
             loopJob = scope.launch(Dispatchers.IO) {
@@ -194,6 +217,64 @@ class TraderController(
             val patch = container.sync.settingsPatch(old, new) ?: return
             val res = container.sync.send("settings", if (msg.isNotEmpty()) mapOf("msg" to msg) else emptyMap(), patch)
             toast(res)
+        }
+    }
+
+    // ---- به‌روزرسانی داخل برنامه ----
+
+    fun checkUpdate(manual: Boolean = true) {
+        if (_update.value.checking || _update.value.progress != null) return
+        scope.launch(Dispatchers.IO) {
+            _update.value = _update.value.copy(checking = true, error = null)
+            try {
+                val info = com.saeidkazemi.trader.update.Updater.check()
+                _update.value = _update.value.copy(checking = false, info = info, lastCheckedAt = System.currentTimeMillis())
+                if (manual) toast(
+                    if (info.isNewer) "نسخه جدید " + info.name + " آماده است؛ دکمه «به‌روزرسانی» را بزنید."
+                    else "برنامه به‌روز است (نسخه " + AppVersion.NAME + ")."
+                )
+            } catch (e: Exception) {
+                _update.value = _update.value.copy(checking = false, error = e.message ?: "خطا", lastCheckedAt = System.currentTimeMillis())
+                if (manual) toast("بررسی نسخه جدید ناموفق بود: " + (e.message ?: ""))
+            }
+        }
+    }
+
+    /** دانلود و نصب نسخه جدید با یک دکمه (خریدها، ژورنال و تنظیمات حفظ می‌شوند). */
+    fun installUpdate() {
+        val dir = hooks.updateDir()
+        if (dir == null) {
+            toast("به‌روزرسانی داخلی در این نسخه پشتیبانی نمی‌شود؛ از صفحه دانلود نصب کنید.")
+            return
+        }
+        if (_update.value.progress != null || _update.value.installing) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val info = _update.value.info?.takeIf { it.isNewer } ?: com.saeidkazemi.trader.update.Updater.check().also {
+                    _update.value = _update.value.copy(info = it, lastCheckedAt = System.currentTimeMillis())
+                }
+                if (!info.isNewer) {
+                    toast("برنامه به‌روز است (نسخه " + AppVersion.NAME + ").")
+                    return@launch
+                }
+                val apk = hooks.updateKind == "apk"
+                val url = if (apk) info.apkUrl else info.msiUrl
+                val sha = if (apk) info.apkSha256 else info.msiSha256
+                val file = java.io.File(dir, "MoameleYar-" + info.name + (if (apk) ".apk" else ".msi"))
+                _update.value = _update.value.copy(progress = 0, error = null)
+                com.saeidkazemi.trader.update.Updater.download(url, file, sha) { p ->
+                    _update.value = _update.value.copy(progress = p)
+                }
+                _update.value = _update.value.copy(progress = null, installing = true)
+                // وضعیت فعلی قبل از نصب ذخیره می‌شود (خریدها و ژورنال همیشه روی فایل هستند)
+                container.store.saveAccount(container.broker.account())
+                val msg = hooks.launchInstaller(file)
+                _update.value = _update.value.copy(installing = false)
+                if (msg != null) toast(msg)
+            } catch (e: Exception) {
+                _update.value = _update.value.copy(progress = null, installing = false, error = e.message)
+                toast("به‌روزرسانی ناموفق بود: " + (e.message ?: ""))
+            }
         }
     }
 

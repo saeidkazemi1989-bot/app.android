@@ -273,6 +273,19 @@ fun runSelfTest(outDir: File): Int {
                 out("bt ${m.market.name} a=${m.assets} d=${m.days} applied=${m.applied} hit60=${m.reachedTarget} | CUR ${pp(m.current)} IN ${f(m.currentIn)} OUT ${f(m.currentOut)} | BEST ${pp(m.best)} IN ${f(m.bestIn)} OUT ${f(m.bestOut)} | exits=${m.exitMix}")
             }
         }
+        // ---- آزمون به‌روزرسانی داخل برنامه (خواندن version.json و دانلود APK فعلی از صفحه دانلود) ----
+        try {
+            val info = try { com.saeidkazemi.trader.update.Updater.check() } catch (e: Exception) { out("update check err=${e.message}"); null }
+            if (info != null) out("update check name=${info.name} code=${info.code} newer=${info.isNewer} apkSha=${info.apkSha256.take(12)} msiSha=${info.msiSha256.take(12)}")
+            val t0 = System.currentTimeMillis()
+            var last = -1
+            val dest = java.io.File(System.getProperty("java.io.tmpdir"), "mupd/MoameleYar-test.apk")
+            val f = com.saeidkazemi.trader.update.Updater.download(info?.apkUrl ?: (com.saeidkazemi.trader.update.Updater.BASE + "MoameleYar-android.apk"), dest, info?.apkSha256 ?: "") { last = it }
+            out("update download ok size=${f.length()} pct=$last t=${(System.currentTimeMillis() - t0) / 1000}s")
+            f.delete()
+        } catch (e: Exception) {
+            out("update download err=${e.message}")
+        }
         // ---- آزمون اتصال اندروید و ویندوز: دستگاه اصلی (همین) + آینه (دستگاه دوم) ----
         var followerForShot: AppContainer? = null
         try {

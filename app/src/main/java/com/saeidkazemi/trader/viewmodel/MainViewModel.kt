@@ -50,6 +50,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
+            override fun updateDir(): java.io.File = java.io.File(app.cacheDir, "updates")
+
+            override val updateKind: String get() = "apk"
+
+            override fun launchInstaller(file: java.io.File): String? {
+                return try {
+                    if (!app.packageManager.canRequestPackageInstalls()) {
+                        app.startActivity(
+                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + app.packageName))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        return "فقط بار اول: اجازه «نصب برنامه از این منبع» را برای معامله‌یار روشن کنید، برگردید و دوباره «به‌روزرسانی» را بزنید (فایل دانلودشده آماده است)."
+                    }
+                    val uri = androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".updates", file)
+                    app.startActivity(
+                        Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    "صفحه نصب اندروید باز شد؛ «به‌روزرسانی» را بزنید. خریدها، ژورنال و تنظیمات حفظ می‌شوند و بعد از نصب، معامله‌گر خودکار دوباره روشن می‌شود."
+                } catch (e: Exception) {
+                    "باز کردن نصب‌کننده ممکن نشد: " + (e.message ?: "")
+                }
+            }
+
             override fun onAutoTradeChanged(on: Boolean) {
                 if (on) TradingService.start(getApplication()) else TradingService.stop(getApplication())
             }

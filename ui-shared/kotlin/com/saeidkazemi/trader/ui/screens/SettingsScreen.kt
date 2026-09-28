@@ -98,6 +98,13 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // به‌روزرسانی داخل برنامه
+        item {
+            com.saeidkazemi.trader.ui.components.UpdateCard(
+                state.appUpdate, state.platform.isDesktop,
+                onInstall = vm::installUpdate, onCheck = { vm.checkUpdate(true) }
+            )
+        }
         // اتصال اندروید و ویندوز
         item {
             com.saeidkazemi.trader.ui.components.SyncSettingsCard(state.sync, state.platform.isDesktop, vm)

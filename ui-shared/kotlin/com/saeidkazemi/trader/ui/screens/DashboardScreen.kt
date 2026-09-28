@@ -47,7 +47,9 @@ fun DashboardScreen(
     onRefresh: () -> Unit,
     onToggleAuto: (Boolean) -> Unit,
     onOpenAsset: (String) -> Unit,
-    onBatteryFix: (() -> Unit)? = null
+    onBatteryFix: (() -> Unit)? = null,
+    onInstallUpdate: () -> Unit = {},
+    onCheckUpdate: () -> Unit = {}
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -71,6 +73,7 @@ fun DashboardScreen(
                 }
             }
 
+            com.saeidkazemi.trader.ui.components.UpdateBanner(state.appUpdate, onInstallUpdate, onCheckUpdate)
             com.saeidkazemi.trader.ui.components.SyncBanner(state.sync)
 
             if (state.error != null) {

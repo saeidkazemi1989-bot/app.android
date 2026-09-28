@@ -127,7 +127,9 @@ fun AppRoot(
                         onRefresh = controller::refresh,
                         onToggleAuto = controller::toggleAutoTrade,
                         onOpenAsset = openAsset,
-                        onBatteryFix = controller::requestBatteryExemption
+                        onBatteryFix = controller::requestBatteryExemption,
+                        onInstallUpdate = controller::installUpdate,
+                        onCheckUpdate = { controller.checkUpdate(true) }
                     )
                 }
             }

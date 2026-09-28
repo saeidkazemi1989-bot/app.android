@@ -130,4 +130,36 @@ class DesktopHooks(private val notifier: TrayNotifier) : TraderController.Platfo
     }
 
     override fun setAutostart(on: Boolean): Boolean = WindowsAutostart.set(on)
+
+    override fun updateDir(): File? = if (WindowsAutostart.isWindows) File(DesktopPaths.dataDir(), "updates") else null
+
+    override val updateKind: String get() = "msi"
+
+    /**
+     * نصب نسخه جدید: برنامه بسته می‌شود، MSI (نصب برای همین کاربر، بدون نیاز به مدیر سیستم) نسخه قبلی را
+     * جایگزین می‌کند و برنامه دوباره باز می‌شود. اطلاعات در %APPDATA%\MoameleYar می‌ماند.
+     */
+    override fun launchInstaller(file: File): String? {
+        if (!WindowsAutostart.isWindows) return "نصب خودکار فقط در ویندوز."
+        val exe = System.getProperty("jpackage.app-path")?.takeIf { it.isNotBlank() }
+        fun q(x: String) = "'" + x.replace("'", "''") + "'"
+        val ps = buildString {
+            append("Start-Sleep -Seconds 3\n")
+            append("Start-Process -FilePath 'msiexec.exe' -ArgumentList ('/i \"' + " + q(file.absolutePath) + " + '\" /passive /norestart') -Wait\n")
+            if (exe != null) append("Start-Process -FilePath " + q(exe) + "\n")
+        }
+        val encoded = java.util.Base64.getEncoder().encodeToString(ps.toByteArray(Charsets.UTF_16LE))
+        return try {
+            ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", encoded)
+                .redirectErrorStream(true)
+                .start()
+            Thread {
+                Thread.sleep(1500)
+                kotlin.system.exitProcess(0)
+            }.apply { isDaemon = false }.start()
+            "برنامه چند لحظه بسته می‌شود، نسخه جدید نصب و " + (if (exe != null) "دوباره باز می‌شود." else "بعد از نصب آن را از منوی استارت باز کنید.")
+        } catch (e: Exception) {
+            "اجرای نصب‌کننده ممکن نشد: " + (e.message ?: "")
+        }
+    }
 }
