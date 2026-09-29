@@ -119,4 +119,19 @@ class ReviewTests {
         val near = engine.analyze(a, hist, com.saeidkazemi.trader.data.model.AppSettings(buyThreshold = tech + 8), null, pro)!!
         assertEquals(com.saeidkazemi.trader.data.model.Action.BUY, near.action)
     }
+
+    /** مشکلی که بعد از به‌روزرسانی دیگر تکرار نشده باید «برطرف شده» نشان داده شود، نه خطای فعال. */
+    @Test
+    fun resolvedIssuesAreNotActive() {
+        val now = System.currentTimeMillis()
+        val old = com.saeidkazemi.trader.review.DiagIssue("a", ReviewLog.AREA_DATA, "داده ارز دیجیتال در دسترس نیست", 325, now - 20 * ReviewLog.H1, now - 3 * ReviewLog.H1)
+        val cur = com.saeidkazemi.trader.review.DiagIssue("b", ReviewLog.AREA_DATA, "داده حقیقی/حقوقی بورس دریافت نشد", 54, now - 5 * ReviewLog.H1, now - 60_000)
+        val s = SelfReview.summary(emptyList(), emptyList(), listOf(old, cur), emptyList(), now - 24 * ReviewLog.H1)
+        assertEquals(1, s.issues)
+        assertEquals(1, s.issuesResolved)
+        val titles = s.findings.orEmpty().map { it.title + ": " + it.detail }
+        assertTrue(titles.any { it.startsWith("مشکل فعال") && "حقیقی" in it }, titles.toString())
+        assertTrue(titles.none { it.startsWith("مشکل فعال") && "ارز دیجیتال" in it }, titles.toString())
+        assertTrue(titles.any { it.startsWith("مشکلات قبلی برطرف شد") }, titles.toString())
+    }
 }

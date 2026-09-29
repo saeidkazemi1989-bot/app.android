@@ -140,7 +140,11 @@ class CryptoSource {
                 val g = geckoTopAssets(limit)
                 if (g.isNotEmpty()) {
                     lastListSource = "CoinGecko"
-                    return g
+                    // ارزی که در نوبیتکس بازار تتری ندارد نه تاریخچه دارد نه قابل معامله واقعی است → فقط نمایشی
+                    val nbx = try { nobitexUsdtStats() } catch (_: Exception) { null }
+                    return if (nbx == null) g else g.map { a ->
+                        if (!a.isDisplayOnly && a.symbol.lowercase() !in nbx) a.copy(isDisplayOnly = true) else a
+                    }
                 }
             } catch (e: Exception) {
                 geckoError = e

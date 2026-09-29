@@ -63,7 +63,10 @@ data class ReviewSummary(
     val rightTrades: Int = 0,
     val verdictCounts: Map<String, Int>? = null,
     val findings: List<Finding>? = null,
-    val issues: Int = 0
+    /** مشکلات فعال (در ۲ ساعت اخیر هم تکرار شده‌اند). */
+    val issues: Int = 0,
+    /** مشکلات قدیمی که بیش از ۲ ساعت است تکرار نشده‌اند (برطرف شده). */
+    val issuesResolved: Int = 0
 )
 
 /**
@@ -148,6 +151,11 @@ object SelfReview {
     // ---------------------------------------------------------------------------------------------
     // کالبدشکافی معاملات
 
+    /** مشکلی «فعال» است که در ۲ ساعت اخیر هم دیده شده باشد؛ قدیمی‌ترها برطرف‌شده حساب می‌شوند. */
+    fun isActive(i: DiagIssue, now: Long = System.currentTimeMillis()): Boolean = now - i.lastAt <= ACTIVE_ISSUE_MS
+
+    const val ACTIVE_ISSUE_MS = 2 * 3_600_000L
+
     fun verdicts(journal: List<JournalEntry>, preds: List<Prediction>): List<Pair<JournalEntry, TradeVerdict>> {
         val byAsset = preds.groupBy { it.assetId }
         return journal.filter { !it.isOpen && !it.backfilled }.sortedByDescending { it.closedAt }.map { e ->
@@ -231,7 +239,8 @@ object SelfReview {
             rightTrades = v.count { it.second.right },
             verdictCounts = v.groupingBy { it.second.verdict }.eachCount(),
             findings = fl.sortedWith(compareByDescending<Finding> { it.severity }.thenBy { if (it.good == false) 0 else if (it.good == null) 1 else 2 }),
-            issues = issues.size
+            issues = issues.count { isActive(it) },
+            issuesResolved = issues.count { !isActive(it) }
         )
     }
 
@@ -345,8 +354,14 @@ object SelfReview {
             if (avgMs > 90_000) out.add(Finding(false, 1, "هر دور بررسی کند است",
                 "میانگین " + f(avgMs / 1000, 0) + " ثانیه در " + recent.size + " دور اخیر.", "کاهش درخواست‌های شبکه در هر دور."))
         }
-        for (i in issues.filter { it.count >= 20 }.take(5)) {
-            out.add(Finding(false, 1, "مشکل تکراری (" + i.area + ")", i.message + " — " + i.count + " بار."))
+        for (i in issues.filter { it.count >= 20 && isActive(it) }.take(5)) {
+            out.add(Finding(false, 1, "مشکل فعال (" + i.area + ")", i.message + " — " + i.count + " بار؛ هنوز تکرار می‌شود."))
+        }
+        val resolved = issues.filter { !isActive(it) }
+        if (resolved.isNotEmpty()) {
+            val top = resolved.maxByOrNull { it.count }!!
+            out.add(Finding(true, 0, "مشکلات قبلی برطرف شد",
+                resolved.size.toString() + " مشکل قبلی بیش از ۲ ساعت است دیگر تکرار نشده؛ مثلاً «" + top.message.take(60) + "» (" + top.count + " بار، قبل از رفع)."))
         }
         // ۶) کمبود داده برای قضاوت
         if (ev1.size < MIN_GROUP) out.add(Finding(null, 0, "هنوز داده کافی برای قضاوت نیست",

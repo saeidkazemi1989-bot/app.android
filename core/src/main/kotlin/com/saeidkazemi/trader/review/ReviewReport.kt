@@ -196,7 +196,11 @@ object ReviewReport {
         // ---- مشکلات فنی
         h("مشکلات فنی و داده‌ای (تکرارشونده)")
         if (issues.isEmpty()) line("(موردی ثبت نشده)")
-        for (i in issues.take(40)) line("- [" + i.area + "] ×" + i.count + " (اولین " + t(i.firstAt) + "، آخرین " + t(i.lastAt) + "): " + i.message)
+        val (act, old) = issues.partition { SelfReview.isActive(it) }
+        if (act.isNotEmpty()) line("فعال (در ۲ ساعت اخیر هم تکرار شده):")
+        for (i in act.take(30)) line("- [" + i.area + "] ×" + i.count + " (اولین " + t(i.firstAt) + "، آخرین " + t(i.lastAt) + "): " + i.message)
+        if (old.isNotEmpty()) line("برطرف‌شده / دیگر تکرار نشده:")
+        for (i in old.take(20)) line("- [" + i.area + "] ×" + i.count + " (اولین " + t(i.firstAt) + "، آخرین " + t(i.lastAt) + "): " + i.message)
         c.store.lastWriteError?.let { line("- [ذخیره‌سازی] آخرین خطای ذخیره: $it") }
         val recent = cycles.takeLast(100)
         if (recent.isNotEmpty()) {

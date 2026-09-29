@@ -263,6 +263,20 @@ class TradeEngine(
     }
 
     /** تحلیل کامل یک دارایی (تکنیکال + اخبار + تخصصی) برای صفحه جزئیات. */
+    /** یک خط خلاصه: داده زنده هر بازار الان رسید یا نه (✓ / ✗). */
+    private fun dataStatusLine(assets: List<Asset>, settings: AppSettings): String {
+        fun live(m: MarketKind) = assets.count { it.market == m && !it.isSimulated && !it.isDisplayOnly }
+        val parts = ArrayList<String>()
+        val c = live(MarketKind.CRYPTO)
+        parts.add(if (c > 0) "ارز دیجیتال ✓ " + c + " ارز (" + market.cryptoListSource.ifEmpty { "زنده" } + ")" else "ارز دیجیتال ✗")
+        val ir = assets.count { it.market == MarketKind.IR_STOCK && !it.isSimulated }
+        parts.add(if (ir > 0) "بورس ✓ " + ir + " سهم" else "بورس ✗")
+        val mt = live(MarketKind.METAL)
+        parts.add(if (mt > 0) "طلا و دلار ✓ " + mt else "طلا و دلار ✗")
+        if (settings.allocationPct(MarketKind.FX) > 0) parts.add(if (live(MarketKind.FX) > 0) "ارز خارجی ✓" else "ارز خارجی ✗")
+        return "وضعیت داده الان: " + parts.joinToString(" • ")
+    }
+
     suspend fun analyzeFull(asset: Asset, history: List<PricePoint>, news: NewsDigest?): Signal? {
         val settings = store.loadSettings()
         val btc = if (asset.market == MarketKind.CRYPTO) {
@@ -899,8 +913,9 @@ class TradeEngine(
             notes.add("خطا در به‌روزرسانی بازار: " + (e.message ?: ""))
             RefreshResult(market.cachedAssets(), emptyList())
         }
-        notes.addAll(result.notes)
         val assets = result.assets
+        notes.add(dataStatusLine(assets, settings))
+        notes.addAll(result.notes)
         if (!IranMarket.isOpen() && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
             notes.add("بازار بورس الان بسته است؛ سهام تحلیل می‌شوند ولی خرید و فروش آن‌ها فقط در ساعت کار بازار (شنبه تا چهارشنبه ۹ تا ۱۲:۳۰) انجام می‌شود.")
         }
@@ -1023,7 +1038,7 @@ class TradeEngine(
             }
             if (proNotes.isNotEmpty()) notes.add("تحلیل تخصصی — " + proNotes.joinToString("؛ ") + ".")
             if (market.iranFlowError != null && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
-                notes.add("داده حقیقی/حقوقی بورس دریافت نشد؛ تحلیل جریان پول سهام در این دور انجام نشد.")
+                notes.add("داده حقیقی/حقوقی بورس دریافت نشد؛ فقط عامل «جریان پول» سهام در این دور حساب نشد (بقیه تحلیل و معامله ادامه دارد).")
             }
         }
 

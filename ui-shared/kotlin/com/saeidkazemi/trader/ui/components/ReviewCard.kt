@@ -91,7 +91,8 @@ fun ReviewCard(state: UiState, vm: TraderController) {
             }
             if (r.sellN1 > 0) lines.add("سیگنال‌های فروش: " + SelfReview.pc(r.sellHit1) + " از " + r.sellN1 + " مورد ۲۴ ساعت بعد پایین‌تر بودند.")
             if (r.closedTrades > 0) lines.add("معاملات بسته: " + r.rightTrades + " از " + r.closedTrades + " درست (سودده).")
-            lines.add("پیش‌بینی ثبت‌شده: " + r.predictions + " • ارزیابی‌شده: " + r.evaluated1 + " (۲۴س) / " + r.evaluated3 + " (۷۲س) • مشکل فنی: " + r.issues)
+            lines.add("پیش‌بینی ثبت‌شده: " + r.predictions + " • ارزیابی‌شده: " + r.evaluated1 + " (۲۴س) / " + r.evaluated3 + " (۷۲س) • مشکل فنی فعال: " + r.issues +
+                (if (r.issuesResolved > 0) " (" + r.issuesResolved + " مشکل قبلی برطرف شده)" else ""))
             lines.forEach { Text(it, fontSize = 12.sp, lineHeight = 19.sp, color = onS, modifier = Modifier.padding(top = 6.dp)) }
             val fl = r.findings.orEmpty()
             val shown = if (expanded) fl else fl.filter { it.good != null }.take(5)

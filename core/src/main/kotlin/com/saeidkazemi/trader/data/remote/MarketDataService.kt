@@ -18,6 +18,9 @@ class MarketDataService {
     private val fxSource = FxSource()
     private val goldSource = GoldSource()
     @Volatile private var goldFailAt = 0L
+
+    /** منبع فعلی فهرست ارزهای دیجیتال (CoinGecko یا نوبیتکس). */
+    val cryptoListSource: String get() = cryptoSource.lastListSource
     private val erSource = ErSource()
     private val iranSource = IranStockSource()
     private val rialSource = NobitexRialSource()
@@ -119,7 +122,7 @@ class MarketDataService {
         val fxAssets = try {
             fxSource.assets()
         } catch (e: Exception) {
-            notes.add("داده ارز خارجی در دسترس نیست.")
+            if (settings.allocationPct(MarketKind.FX) > 0) notes.add("داده ارز خارجی در دسترس نیست.")
             emptyList()
         }
 
@@ -157,7 +160,7 @@ class MarketDataService {
         list.addAll(fxAssets)
 
         if (cryptoAssets.isNotEmpty() && cryptoSource.lastListSource == "نوبیتکس") {
-            notes.add("قیمت ارزهای دیجیتال از بازار تتری نوبیتکس خوانده شد (منبع CoinGecko پاسخ نداد).")
+            notes.add("✓ قیمت ارزهای دیجیتال از نوبیتکس (منبع جایگزین) دریافت شد؛ ارزها عادی تحلیل و مدیریت می‌شوند.")
         }
 
         try {
