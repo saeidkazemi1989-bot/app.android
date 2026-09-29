@@ -17,6 +17,7 @@ class MarketDataService {
     private val cryptoSource = CryptoSource()
     private val fxSource = FxSource()
     private val goldSource = GoldSource()
+    @Volatile private var goldFailAt = 0L
     private val erSource = ErSource()
     private val iranSource = IranStockSource()
     private val rialSource = NobitexRialSource()
@@ -89,14 +90,30 @@ class MarketDataService {
         return System.currentTimeMillis() - c.ts < ttl
     }
 
-    suspend fun refresh(settings: AppSettings, mustInclude: Set<String> = emptySet()): RefreshResult {
+    suspend fun refresh(
+        settings: AppSettings,
+        mustInclude: Set<String> = emptySet(),
+        heldCrypto: List<Triple<String, String, String>> = emptyList()
+    ): RefreshResult {
         val notes = mutableListOf<String>()
 
-        val cryptoAssets = try {
+        val cryptoAssets = (try {
             cryptoSource.topAssets(40)
         } catch (e: Exception) {
-            notes.add("داده ارز دیجیتال در دسترس نیست (اتصال اینترنت یا محدودیت سرویس).")
-            emptyList()
+            notes.add("داده ارز دیجیتال در دسترس نیست (CoinGecko و نوبیتکس هر دو پاسخ ندادند: " + (e.message ?: e.javaClass.simpleName).take(80) + ").")
+            emptyList<Asset>()
+        }).toMutableList()
+        // خریدهای باز ارز دیجیتال باید همیشه قیمت داشته باشند تا حد ضرر و حد سودشان مدیریت شود
+        val missingHeld = heldCrypto.filter { h -> cryptoAssets.none { it.id == h.first } }
+        if (missingHeld.isNotEmpty()) {
+            var got = 0
+            for ((id, sym, name) in missingHeld) {
+                val a = try { cryptoSource.nobitexAssetFor(id, sym, name) } catch (_: Exception) { null }
+                if (a != null) { cryptoAssets.add(a); got++ }
+            }
+            if (got < missingHeld.size) {
+                notes.add("قیمت " + (missingHeld.size - got) + " ارزِ داخل پرتفوی دریافت نشد؛ حد ضرر آن‌ها در این دور بررسی نشد.")
+            }
         }
 
         val fxAssets = try {
@@ -139,8 +156,18 @@ class MarketDataService {
         list.addAll(cryptoAssets)
         list.addAll(fxAssets)
 
+        if (cryptoAssets.isNotEmpty() && cryptoSource.lastListSource == "نوبیتکس") {
+            notes.add("قیمت ارزهای دیجیتال از بازار تتری نوبیتکس خوانده شد (منبع CoinGecko پاسخ نداد).")
+        }
+
         try {
-            val xau = goldSource.xauUsd()
+            // قیمت جهانی طلا: gold-api.com؛ اگر نشد، PAXG نوبیتکس (هر توکن = یک اونس طلا)
+            val now0 = System.currentTimeMillis()
+            var xau: Double? = if (now0 - goldFailAt > 20 * 60_000L) goldSource.xauUsd() else null
+            if (xau == null) {
+                if (now0 - goldFailAt > 20 * 60_000L) goldFailAt = now0
+                xau = try { cryptoSource.nobitexUsdtPrice("paxg") } catch (_: Exception) { null }
+            }
             val now = System.currentTimeMillis()
             if (xau != null) {
                 list.add(

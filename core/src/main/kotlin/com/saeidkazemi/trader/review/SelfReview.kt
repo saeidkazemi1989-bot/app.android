@@ -155,14 +155,20 @@ object SelfReview {
             val mfe = e.maxGainPct ?: maxOf(pnl, 0.0)
             val verdict: String
             val right: Boolean
+            // طلا و دلار نوسان کمی دارند؛ ۱٪ حرکت مثبت برایشان معنادار است (برای بقیه ۳٪)
+            val lowVol = e.market == MarketKind.METAL || e.market == MarketKind.FX
+            val good = if (lowVol) 1.0 else 3.0
+            val tiny = if (lowVol) 0.4 else 1.0
+            val manualExit = (e.exitReason ?: "").let { r -> "خبر" in r || "ضعیف شدن سیگنال" in r || "تخصصی" in r }
             if (e.isWin) {
                 right = true
-                verdict = if (mfe >= 5 && pnl < mfe * 0.4) "برد، ولی بیشتر سود پس داده شد" else "درست (سود)"
+                verdict = if (mfe >= good * 5 / 3 && pnl < mfe * 0.4) "برد، ولی بیشتر سود پس داده شد" else "درست (سود)"
             } else {
                 right = false
                 verdict = when {
-                    mfe >= 3 -> "ورود درست، خروج بد (سود داشت، با زیان بسته شد)"
-                    mfe < 1 -> "ورود غلط (از همان اول خلاف جهت رفت)"
+                    mfe >= good && manualExit -> "ورود درست، خروج زودهنگام (در سود بود؛ با «" + (e.exitReason ?: "").take(30) + "» بی‌سود بسته شد)"
+                    mfe >= good -> "ورود درست، خروج بد (سود داشت، با زیان بسته شد)"
+                    mfe < tiny -> "ورود غلط (از همان اول خلاف جهت رفت)"
                     else -> "ورود ضعیف (حرکت مثبت کافی نداشت)"
                 }
             }

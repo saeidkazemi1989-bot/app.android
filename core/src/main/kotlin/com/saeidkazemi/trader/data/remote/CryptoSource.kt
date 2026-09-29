@@ -71,6 +71,49 @@ class CryptoSource {
         /** تعداد ارزهای برتر که تاریخچه و سیگنال می‌گیرند (بقیه فقط نمایشی‌اند). */
         const val HISTORY_LIMIT = 25
 
+        const val GECKO_BACKOFF_MS = 20 * 60_000L
+
+        /** شناسه CoinGecko هر نماد که قبلاً دیده شده (تا شناسه دارایی‌ها با تغییر منبع عوض نشود). */
+        private val learnedIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        /**
+         * ارزهای جایگزین از نوبیتکس (نماد نوبیتکس ← شناسه CoinGecko، نام، رتبه تقریبی بازار).
+         * شناسه‌ها همان شناسه‌های CoinGecko هستند تا خریدهای باز با تغییر منبع قیمتشان را گم نکنند.
+         */
+        val FALLBACK: List<Pair<String, Triple<String, String, Int>>> = listOf(
+            "btc" to Triple("bitcoin", "Bitcoin", 1),
+            "eth" to Triple("ethereum", "Ethereum", 2),
+            "xrp" to Triple("ripple", "XRP", 4),
+            "bnb" to Triple("binancecoin", "BNB", 5),
+            "sol" to Triple("solana", "Solana", 6),
+            "doge" to Triple("dogecoin", "Dogecoin", 8),
+            "trx" to Triple("tron", "TRON", 9),
+            "ada" to Triple("cardano", "Cardano", 10),
+            "link" to Triple("chainlink", "Chainlink", 12),
+            "bch" to Triple("bitcoin-cash", "Bitcoin Cash", 13),
+            "xlm" to Triple("stellar", "Stellar", 14),
+            "sui" to Triple("sui", "Sui", 15),
+            "avax" to Triple("avalanche-2", "Avalanche", 16),
+            "hbar" to Triple("hedera-hashgraph", "Hedera", 17),
+            "ltc" to Triple("litecoin", "Litecoin", 19),
+            "ton" to Triple("the-open-network", "Toncoin", 20),
+            "xmr" to Triple("monero", "Monero", 22),
+            "dot" to Triple("polkadot", "Polkadot", 24),
+            "uni" to Triple("uniswap", "Uniswap", 25),
+            "near" to Triple("near", "NEAR Protocol", 26),
+            "aave" to Triple("aave", "Aave", 27),
+            "zec" to Triple("zcash", "Zcash", 28),
+            "etc" to Triple("ethereum-classic", "Ethereum Classic", 30),
+            "apt" to Triple("aptos", "Aptos", 35),
+            "atom" to Triple("cosmos", "Cosmos Hub", 40),
+            "fil" to Triple("filecoin", "Filecoin", 42),
+            "arb" to Triple("arbitrum", "Arbitrum", 45),
+            "algo" to Triple("algorand", "Algorand", 48),
+            "op" to Triple("optimism", "Optimism", 55),
+            "pol" to Triple("polygon-ecosystem-token", "POL (ex-MATIC)", 58),
+            "dash" to Triple("dash", "Dash", 90)
+        )
+
         /** استیبل‌کوین‌ها و توکن‌های بسته‌بندی‌شده: قیمتشان تکرار دارایی دیگر است و معامله‌شان سودی ندارد. */
         private val NON_TRADABLE = setOf(
             "USDT", "USDC", "DAI", "FDUSD", "USDE", "TUSD", "PYUSD", "USDS", "BUSD", "USD1", "USDD", "USDTB", "BSC-USD",
@@ -78,7 +121,112 @@ class CryptoSource {
         )
     }
 
+    /** آخرین منبع فهرست ارزها: «CoinGecko» یا «نوبیتکس». */
+    @Volatile var lastListSource: String = ""
+        private set
+
+    @Volatile private var geckoFailAt = 0L
+    @Volatile private var statsCache: Pair<Long, Map<String, com.google.gson.JsonObject>>? = null
+
+    /**
+     * فهرست ارزها: اول CoinGecko؛ اگر در دسترس نبود (از ایران گاهی مسدود است)، از آمار بازارهای تتری نوبیتکس
+     * (از ایران در دسترس). بعد از هر خطای CoinGecko، ۲۰ دقیقه مستقیم از نوبیتکس خوانده می‌شود.
+     */
     suspend fun topAssets(limit: Int = 40): List<Asset> {
+        val now = System.currentTimeMillis()
+        var geckoError: Exception? = null
+        if (now - geckoFailAt > GECKO_BACKOFF_MS) {
+            try {
+                val g = geckoTopAssets(limit)
+                if (g.isNotEmpty()) {
+                    lastListSource = "CoinGecko"
+                    return g
+                }
+            } catch (e: Exception) {
+                geckoError = e
+            }
+            geckoFailAt = now
+        }
+        val n = try { nobitexTopAssets() } catch (e: Exception) { throw geckoError ?: e }
+        if (n.isEmpty()) throw geckoError ?: IllegalStateException("no crypto data")
+        lastListSource = "نوبیتکس"
+        return n
+    }
+
+    /** آمار همه بازارهای تتری نوبیتکس (کش ۵۰ ثانیه): کلید = نماد کوچک (مثل btc). */
+    suspend fun nobitexUsdtStats(): Map<String, com.google.gson.JsonObject> {
+        statsCache?.let { (t, m) -> if (System.currentTimeMillis() - t < 50_000) return m }
+        val body = getJson("https://apiv2.nobitex.ir/market/stats?dstCurrency=usdt")
+        val root = JsonParser.parseString(body).asJsonObject
+        if (root.get("status")?.asString != "ok") throw IllegalStateException("nobitex stats: " + (root.get("message")?.asString ?: "failed"))
+        val stats = root.getAsJsonObject("stats") ?: throw IllegalStateException("nobitex stats empty")
+        val out = HashMap<String, com.google.gson.JsonObject>()
+        for ((k, v) in stats.entrySet()) {
+            if (!k.endsWith("-usdt") || !v.isJsonObject) continue
+            out[k.removeSuffix("-usdt")] = v.asJsonObject
+        }
+        statsCache = System.currentTimeMillis() to out
+        return out
+    }
+
+    /** قیمت لحظه‌ای یک ارز در بازار تتری نوبیتکس. */
+    suspend fun nobitexUsdtPrice(sym: String): Double? {
+        val o = nobitexUsdtStats()[sym.lowercase()] ?: return null
+        return num(o, "latest")?.takeIf { it > 0 } ?: num(o, "mark")
+    }
+
+    private fun num(o: com.google.gson.JsonObject, k: String): Double? = try {
+        o.get(k)?.takeIf { !it.isJsonNull }?.asString?.toDoubleOrNull()?.takeIf { it.isFinite() }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** قیمت یک ارز مشخص (مثلاً یک خرید باز) از بازار تتری نوبیتکس؛ شناسه دارایی حفظ می‌شود. */
+    suspend fun nobitexAssetFor(id: String, symbol: String, name: String): Asset? {
+        val sym = symbol.lowercase().filter { it.isLetterOrDigit() || it == '_' }
+        val o = nobitexUsdtStats()[sym] ?: return null
+        if (o.get("isClosed")?.asBoolean == true) return null
+        val price = num(o, "latest")?.takeIf { it > 0 } ?: return null
+        return Asset(
+            id = id, symbol = symbol.uppercase(), name = name, market = MarketKind.CRYPTO, baseCurrency = "USD",
+            price = price, changePct24h = num(o, "dayChange"), updatedAt = System.currentTimeMillis(),
+            isSimulated = false, isDisplayOnly = false, rank = null, nobitexSymbol = nobitexMap[id] ?: sym,
+            bidPrice = num(o, "bestBuy")?.takeIf { it > 0 }, askPrice = num(o, "bestSell")?.takeIf { it > 0 }
+        )
+    }
+
+    private suspend fun nobitexTopAssets(): List<Asset> {
+        val now = System.currentTimeMillis()
+        val stats = nobitexUsdtStats()
+        val out = ArrayList<Asset>()
+        for ((sym, info) in FALLBACK) {
+            val o = stats[sym] ?: continue
+            if (o.get("isClosed")?.asBoolean == true) continue
+            val price = num(o, "latest")?.takeIf { it > 0 } ?: continue
+            val id = learnedIds[sym.uppercase()] ?: info.first
+            out.add(
+                Asset(
+                    id = id,
+                    symbol = sym.uppercase(),
+                    name = info.second,
+                    market = MarketKind.CRYPTO,
+                    baseCurrency = "USD",
+                    price = price,
+                    changePct24h = num(o, "dayChange"),
+                    updatedAt = now,
+                    isSimulated = false,
+                    isDisplayOnly = info.third > HISTORY_LIMIT,
+                    rank = info.third,
+                    nobitexSymbol = nobitexMap[id] ?: sym,
+                    bidPrice = num(o, "bestBuy")?.takeIf { it > 0 },
+                    askPrice = num(o, "bestSell")?.takeIf { it > 0 }
+                )
+            )
+        }
+        return out.sortedBy { it.rank ?: Int.MAX_VALUE }
+    }
+
+    private suspend fun geckoTopAssets(limit: Int): List<Asset> {
         val now = System.currentTimeMillis()
         val list = api.markets(
             vsCurrency = "usd",
@@ -90,6 +238,7 @@ class CryptoSource {
         return list.mapNotNull { c ->
             val id = c.id ?: return@mapNotNull null
             val price = c.current_price ?: return@mapNotNull null
+            c.symbol?.let { learnedIds[it.uppercase()] = id }
             val rank = c.market_cap_rank
             Asset(
                 id = id,

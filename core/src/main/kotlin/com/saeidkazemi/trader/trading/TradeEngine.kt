@@ -60,6 +60,8 @@ class TradeEngine(
 ) {
 
     companion object {
+        /** کمترین مبلغ خرید با «باقی‌مانده نقد» یک بازار (بالاتر از حداقل سفارش ۳۰۰ هزار تومانی نوبیتکس). */
+        const val LEFTOVER_MIN_USD = 4.0
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
 
@@ -337,7 +339,7 @@ class TradeEngine(
         val held = acc.positions.filter { it.market == m }
         val closedHere = journal.all().filter { it.market == m && !it.isOpen }.map { it.symbol }.toSet()
         val sold = soldSymbols.count { it in closedHere }
-        val blockedHigh = mine.count { it.score >= th && it.action != Action.BUY }
+        val blockedHigh = mine.count { it.score >= th && it.action != Action.BUY && (it.newsBlocked || it.proBlocked) }
         val status = when {
             bought > 0 -> "این دور " + bought + " خرید انجام شد"
             m == MarketKind.IR_STOCK && !IranMarket.isOpen() -> "بازار بورس بسته است (شنبه تا چهارشنبه ۹:۰۰ تا ۱۲:۳۰)؛ خرید و فروش سهام فقط در ساعت بازار"
@@ -889,7 +891,10 @@ class TradeEngine(
 
         val heldIds = broker.account().positions.map { it.assetId }.toSet()
         val result = try {
-            market.refresh(settings, heldIds)
+            market.refresh(
+                settings, heldIds,
+                broker.account().positions.filter { it.market == MarketKind.CRYPTO }.map { Triple(it.assetId, it.symbol, it.name) }
+            )
         } catch (e: Exception) {
             notes.add("خطا در به‌روزرسانی بازار: " + (e.message ?: ""))
             RefreshResult(market.cachedAssets(), emptyList())
@@ -1076,7 +1081,12 @@ class TradeEngine(
                 curUsd <= pos.stopLossUsd -> "فعال شدن حد ضرر"
                 curUsd >= pos.takeProfitUsd -> "فعال شدن حد سود"
                 holdExpired(pos, settings) -> "پایان مهلت نگهداری " + planFor(settings, pos.market).maxHoldDays + " روزه (طبق بک‌تست)"
-                sig != null && sig.newsBlocked -> "خروج به‌خاطر خبر منفی مهم"
+                // یک تیتر منفی به‌تنهایی کافی نیست: جمع اثر اخبار هم باید منفی باشد، و برای طلا/دلار
+                // (که تیترهای عمومی زیادی دارند) امتیاز کلی هم باید زیر آستانه خرید رفته باشد.
+                sig != null && sig.newsBlocked && sig.newsAdj < 0 &&
+                    ((pos.market != MarketKind.METAL && pos.market != MarketKind.FX) ||
+                        sig.score < settings.buyThreshold + planFor(settings, pos.market).buyThresholdDelta) ->
+                    "خروج به‌خاطر خبر منفی مهم"
                 sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
                 sig != null && sig.score <= settings.sellThreshold && planFor(settings, pos.market).entryMode == 0 -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
                 else -> null
@@ -1175,11 +1185,16 @@ class TradeEngine(
                     if (amount < plan.minTradeUsd && available >= plan.minTradeUsd) {
                         amount = plan.minTradeUsd
                         sizeNote = "، حداقل مبلغ معامله چون سهم این بازار کوچک است"
+                    } else if (amount < plan.minTradeUsd && available >= LEFTOVER_MIN_USD) {
+                        // باقی‌مانده نقد (بین ۴ تا ۱۰ دلار) بیکار نماند: کل آن خرج یک خرید می‌شود
+                        // (۴ دلار بالاتر از حداقل سفارش نوبیتکس، ۳۰۰ هزار تومان، است)
+                        amount = available
+                        sizeNote = "، کل نقد باقی‌مانده این بازار"
                     }
-                    if (amount < plan.minTradeUsd) {
+                    if (amount < LEFTOVER_MIN_USD) {
                         val held = acc.positions.count { it.market == m }
                         stopReason = "نقد آزاد این بازار ($" + Format.num(maxOf(0.0, available)) + " پس از ذخیره نقدی) کمتر از حداقل معامله ($" +
-                            Format.num(plan.minTradeUsd, 0) + ") است؛ " +
+                            Format.num(LEFTOVER_MIN_USD, 0) + ") است؛ " +
                             (if (held > 0) "خرید بعدی بعد از فروش یکی از " + held + " موقعیت فعلی"
                             else "برای معامله در این بازار سهم آن را در تنظیمات ← تقسیم سرمایه بیشتر کنید")
                         break
@@ -1219,7 +1234,7 @@ class TradeEngine(
                     }
                 }
                 activity.add(
-                    buildActivity(m, settings, plan.maxPositions, plan.minTradeUsd, th, reserve, signals, priceMap, boughtHere, sells, skipped, stopReason)
+                    buildActivity(m, settings, plan.maxPositions, LEFTOVER_MIN_USD, th, reserve, signals, priceMap, boughtHere, sells, skipped, stopReason)
                 )
             }
             if (signals.isEmpty()) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")

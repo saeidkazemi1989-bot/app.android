@@ -83,4 +83,40 @@ class ReviewTests {
         val code = ReportUploader.newCode()
         assertTrue(Regex("[A-Z2-9]{4}-[A-Z2-9]{4}").matches(code))
     }
+
+    /** گزارش واقعی BCV6-HJB8: PAXG با ۱٫۵۵٪ سود شناور، با «خبر منفی» بی‌سود بسته شد؛ نباید «ورود ضعیف» باشد. */
+    @Test
+    fun lowVolNewsExitVerdict() {
+        val t0 = 1_790_000_000_000L
+        val e = com.saeidkazemi.trader.data.model.JournalEntry(
+            id = "j1", assetId = "nbx:PAXG", symbol = "PAXG", name = "PAXG", market = com.saeidkazemi.trader.data.model.MarketKind.METAL,
+            auto = true, mode = "demo", openedAt = t0, entryUsd = 4170.0, entryNative = 4170.0, nativeCurrency = "USD", usdIrr = 1.0,
+            amountUsd = 10.0, buyFeeUsd = 0.02, qty = 10.0 / 4170, entryReason = "x",
+            closedAt = t0 + 26 * ReviewLog.H1, exitUsd = 4170.0, exitNative = 4170.0, exitReason = "خروج به‌خاطر خبر منفی مهم",
+            pnlUsd = -0.05, pnlPct = -0.5, peakUsd = 4170.0 * 1.0155, troughUsd = 4170.0 * 0.9957
+        )
+        val v = SelfReview.verdicts(listOf(e), emptyList()).single().second
+        assertTrue(v.verdict.startsWith("ورود درست، خروج زودهنگام"), v.verdict)
+    }
+
+    /** اثر مثبت اخبار/تخصصی حداکثر +۸ به تصمیم ورود کمک می‌کند (آستانه بک‌تست روی امتیاز تکنیکال است). */
+    @Test
+    fun entryBoostIsCapped() {
+        val a = com.saeidkazemi.trader.data.model.Asset(
+            id = "solana", symbol = "SOL", name = "Solana", market = com.saeidkazemi.trader.data.model.MarketKind.CRYPTO,
+            baseCurrency = "USD", price = 200.0, changePct24h = 1.0, updatedAt = System.currentTimeMillis()
+        )
+        val hist = (0 until 90).map { i -> com.saeidkazemi.trader.data.model.PricePoint(1_700_000_000_000L + i * 86_400_000L, 100.0 * Math.pow(1.001, i.toDouble()) * (1 + 0.03 * Math.sin(i * 0.5))) }
+        val engine = com.saeidkazemi.trader.analysis.StrategyEngine()
+        val base = engine.analyze(a, hist, com.saeidkazemi.trader.data.model.AppSettings(buyThreshold = 99))!!
+        val tech = base.technicalScore
+        val boost = minOf(20, 100 - tech)
+        assertTrue(boost >= 12, "tech=$tech")
+        val pro = com.saeidkazemi.trader.analysis.ProAnalysis.Result(boost, listOf(com.saeidkazemi.trader.data.model.ProFactor("جریان پول", "مثبت", boost)), false, null)
+        val far = engine.analyze(a, hist, com.saeidkazemi.trader.data.model.AppSettings(buyThreshold = tech + 10), null, pro)!!
+        assertEquals(tech + boost, far.score)
+        assertEquals(com.saeidkazemi.trader.data.model.Action.HOLD, far.action)
+        val near = engine.analyze(a, hist, com.saeidkazemi.trader.data.model.AppSettings(buyThreshold = tech + 8), null, pro)!!
+        assertEquals(com.saeidkazemi.trader.data.model.Action.BUY, near.action)
+    }
 }

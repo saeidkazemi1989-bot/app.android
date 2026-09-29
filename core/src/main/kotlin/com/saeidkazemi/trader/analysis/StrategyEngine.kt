@@ -26,6 +26,8 @@ class StrategyEngine {
 
     companion object {
         const val MIN_HISTORY = 40
+        /** حداکثر اثر مثبت اخبار + تحلیل تخصصی در تصمیم ورود (آستانه بک‌تست روی امتیاز تکنیکال است). */
+        const val MAX_ENTRY_BOOST = 8
     }
 
     fun analyze(
@@ -143,8 +145,17 @@ class StrategyEngine {
             }
             if (blocked) reasons.add(news.blockReason ?: "خبر منفی مهم؛ خرید متوقف شد")
         }
+        // آستانه خرید با بک‌تست روی «امتیاز تکنیکال» تنظیم شده؛ اگر اثر مثبت اخبار/تحلیل تخصصی (تا +۳۲)
+        // کامل حساب شود، آستانه عملاً پایین می‌آید (در گزارش واقعی ۴۰۷ از ۶۲۴ سهم «خرید» شده بودند).
+        // پس برای تصمیم ورود، اثر مثبت حداکثر MAX_ENTRY_BOOST امتیاز است؛ اثر منفی کامل حساب می‌شود.
+        val entryScore = technical + minOf(newsAdj + proAdj, MAX_ENTRY_BOOST)
+        val weakTech = total >= buyThreshold && entryScore < buyThreshold
+        if (weakTech && !(blocked || proBlocked)) {
+            reasons.add("امتیاز تکنیکال (" + technical + ") برای ورود کافی نیست؛ اخبار و تحلیل تخصصی حداکثر +" + MAX_ENTRY_BOOST + " به آستانه کمک می‌کنند")
+        }
         val action = when {
             (blocked || proBlocked) && total >= buyThreshold -> Action.HOLD
+            weakTech -> Action.HOLD
             total >= buyThreshold -> Action.BUY
             total <= 35 -> Action.SELL
             else -> Action.HOLD
