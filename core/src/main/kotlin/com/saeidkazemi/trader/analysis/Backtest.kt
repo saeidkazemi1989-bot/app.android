@@ -161,7 +161,9 @@ object Backtest {
     data class Report(
         val createdAt: Long = 0L,
         val results: List<MarketResult> = emptyList(),
-        val notes: List<String> = emptyList()
+        val notes: List<String> = emptyList(),
+        /** مطالعه ورود/خروج پله‌ای روی همان داده (فقط گزارش؛ روی معاملات اعمال نمی‌شود). */
+        val scale: List<ScaleStudy.Row>? = null
     ) {
         fun appliedFor(m: MarketKind): Params? = results.firstOrNull { it.market == m && it.applied }?.best
     }

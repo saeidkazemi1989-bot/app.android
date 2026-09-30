@@ -121,7 +121,8 @@ class TradeEngine(
     private fun maybeStartBacktest() {
         if (backtestRunning) return
         val last = backtest?.createdAt ?: 0L
-        if (System.currentTimeMillis() - last < 24 * 3_600_000L) return
+        // نسخه‌های قبل مطالعه پله‌ای نداشتند: یک بار زودتر تکرار می‌شود
+        if (System.currentTimeMillis() - last < 24 * 3_600_000L && backtest?.scale != null) return
         if (market.cachedAssets().isEmpty()) return
         bgScope.launch {
             try {
@@ -143,6 +144,7 @@ class TradeEngine(
             val assets = market.cachedAssets()
             val results = ArrayList<Backtest.MarketResult>()
             val notes = ArrayList<String>()
+            val scale = ArrayList<com.saeidkazemi.trader.analysis.ScaleStudy.Row>()
             val sem = Semaphore(4)
             for (m in listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.METAL)) {
                 val pool = assets.filter { it.market == m && !it.isDisplayOnly && !it.isSimulated }
@@ -173,10 +175,14 @@ class TradeEngine(
                 backtestProgress = "بهینه‌سازی " + m.faTitle + "…"
                 val base = riskManager.plan(settings.riskFor(m), m)
                 val current = Backtest.paramsOf(base, settings.buyThreshold + base.buyThresholdDelta)
-                Backtest.optimize(m, series, current, settings)?.let { results.add(it) }
+                Backtest.optimize(m, series, current, settings)?.let { res ->
+                    results.add(res)
+                    val studied = res.best?.takeIf { res.applied } ?: res.current
+                    try { scale.addAll(com.saeidkazemi.trader.analysis.ScaleStudy.run(m, series, studied, settings)) } catch (_: Exception) { }
+                }
             }
             if (results.isEmpty() && backtest != null) return backtest
-            val report = Backtest.Report(System.currentTimeMillis(), results, notes)
+            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale)
             backtest = report
             store.saveBacktest(report)
             if (results.any { it.applied }) {

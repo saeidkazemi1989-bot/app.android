@@ -224,6 +224,10 @@ object ReviewReport {
                 "آستانه " + x.threshold + " حد سود " + f(x.tpPct * 100, 1) + "٪ حد ضرر " + f(x.minStopPct * 100, 1) + "-" + f(x.maxStopPct * 100, 1) + "٪ متحرک " + f(x.trailPct * 100, 1) + "٪ مهلت " + x.maxHoldDays + " روز فیلتر " + x.filter + " نوع " + x.mode
             } ?: "—") + " • خارج از نمونه: n=" + ((if (r.applied) r.bestOut else r.currentOut)?.trades ?: 0) + " WR " + f((if (r.applied) r.bestOut else r.currentOut)?.winRate, 1) + "%")
         }
+        h("آزمون ورود/خروج پله‌ای روی همان داده (فقط مقایسه؛ اعمال نشده)")
+        val sc = bt?.scale.orEmpty()
+        if (sc.isEmpty()) line("(هنوز اجرا نشده؛ با بک‌تست بعدی انجام می‌شود)")
+        com.saeidkazemi.trader.analysis.ScaleStudy.lines(sc).forEach { line(it) }
         h("تنظیمات")
         val gson = GsonBuilder().serializeSpecialFloatingPointValues().create()
         line(gson.toJson(settings.copy(nobitexToken = if (settings.nobitexToken.isBlank()) "" else "***")))
