@@ -104,10 +104,13 @@ object ScaleStudy {
             var peak = e0
             // حساب بر حسب یک واحد سرمایه (۱ دلار) برای هر معامله
             var units = 0.0
+            var bought = 0.0
             var spent = 0.0
             var proceeds = 0.0
             fun buy(amount: Double, px: Double) {
-                units += amount * (1 - bf) / (px * (1 + hs))
+                val u = amount * (1 - bf) / (px * (1 + hs))
+                units += u
+                bought += u
                 spent += amount
             }
             fun sell(frac: Double, px: Double) {
@@ -115,7 +118,8 @@ object ScaleStudy {
                 proceeds += u * px * (1 - hs) * (1 - sf)
                 units -= u
             }
-            fun breakEven(): Double = if (units > 0) (spent - proceeds) / units / ((1 - hs) * (1 - sf)) else 0.0
+            // سربه‌سر = قیمت خرید (میانگین) به‌علاوه کارمزدها؛ بقیه موقعیت دیگر زیر قیمت خرید فروخته نمی‌شود
+            fun breakEven(): Double = if (bought > 0) spent / bought / ((1 - hs) * (1 - sf)) else 0.0
             buy(if (v.entry == 0) 1.0 else 0.5, e0)
             var addDone = v.entry == 0
             var partialIdx = 0
