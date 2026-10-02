@@ -73,7 +73,9 @@ data class JournalEntry(
     val troughUsd: Double? = null,
     val profitLockedPct: Double = 0.0,
     /** از روی تاریخچه معاملات قبل از ژورنال ساخته شده (دلایل ورود در دسترس نیست). */
-    val backfilled: Boolean = false
+    val backfilled: Boolean = false,
+    /** خرید پله‌ای: شرح پله دوم (در انتظار / خریده شد / لغو شد). */
+    val scaleNote: String? = null
 ) {
     val isOpen: Boolean get() = closedAt == null
     val isWin: Boolean get() = (pnlUsd ?: 0.0) > 0

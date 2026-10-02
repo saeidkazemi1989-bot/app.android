@@ -498,6 +498,16 @@ class TraderController(
         toast(if (on) "تحلیل تخصصی (جریان پول، حجم، ارزش‌گذاری، ترس و طمع، …) فعال شد." else "تحلیل تخصصی غیرفعال شد.")
     }
 
+    /** خرید پله‌ای با تأیید برای یک بازار. */
+    fun toggleScaledEntry(m: com.saeidkazemi.trader.data.model.MarketKind, on: Boolean) {
+        updateSettings { s ->
+            val cur = s.scaledEntryMarkets.orEmpty().toMutableSet()
+            if (on) cur.add(m.name) else cur.remove(m.name)
+            s.copy(scaledEntryMarkets = cur.toList())
+        }
+        toast(if (on) "خرید پله‌ای با تأیید برای " + m.faTitle + " روشن شد (برای خریدهای جدید)." else "خرید پله‌ای " + m.faTitle + " خاموش شد؛ خریدهای جدید یک‌جا انجام می‌شوند.")
+    }
+
     fun toggleProfitLock(on: Boolean) {
         updateSettings { it.copy(profitLock = on) }
         toast(if (on) "قفل سود فعال شد." else "قفل سود غیرفعال شد؛ فقط حد ضرر عادی و متحرک اعمال می‌شود.")

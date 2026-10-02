@@ -118,7 +118,16 @@ data class Position(
      * دارایی‌های ریالی (سهام): نرخ دلار (ریال) در لحظه خرید که برای کل عمر موقعیت ثابت می‌ماند،
      * تا سود/زیان دقیقاً همان سود/زیان ریالی سهم باشد و نوسان دلار آن را جابه‌جا نکند. ۰ یعنی ندارد.
      */
-    val fxRate: Double = 0.0
+    val fxRate: Double = 0.0,
+    /**
+     * خرید پله‌ای با تأیید: مبلغ پله دوم که هنوز خریده نشده (دلار)، قیمتی که در صورت رسیدن به آن خریده می‌شود،
+     * و مهلت آن. ۰ یعنی پله دوم ندارد (یا انجام/لغو شده).
+     */
+    val addPendingUsd: Double = 0.0,
+    val addTriggerUsd: Double = 0.0,
+    val addDeadline: Long = 0L,
+    /** پله دوم خریده شد (زمان)؛ ۰ یعنی نه. */
+    val addedAt: Long = 0L
 ) {
     /** بهای تمام‌شده برای محاسبه سود/زیان واقعی (با کارمزد خرید). */
     fun cost(): Double = if (costUsd > 0) costUsd else qty * avgBuyUsd
@@ -201,8 +210,14 @@ data class AppSettings(
     /** استفاده از پارامترهای بهینه بک‌تست (حد سود/ضرر، آستانه، مهلت نگهداری) برای خریدهای جدید. */
     val useBacktestParams: Boolean = true,
     /** زمان اولین اعمال پارامترهای بک‌تست (مهلت نگهداری فقط برای خریدهای بعد از آن). */
-    val backtestSince: Long = 0L
+    val backtestSince: Long = 0L,
+    /**
+     * بازارهایی که «خرید پله‌ای با تأیید» دارند: نصف مبلغ خرید فوراً، نصف دوم فقط اگر قیمت ظرف ۵ روز
+     * به اندازه نصف فاصله حد ضرر بالا برود (آزمون پله‌ای روی داده واقعی گوشی برای ارز دیجیتال بهتر بود).
+     */
+    val scaledEntryMarkets: List<String>? = listOf("CRYPTO")
 ) {
+    fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0
     fun riskFor(m: MarketKind): String = marketRisk[m.name] ?: riskLevel
 }

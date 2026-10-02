@@ -72,6 +72,9 @@ class TradeJournal(private val store: JsonStore?) {
         true
     }
 
+    /** تغییر ردیف باز یک دارایی (مثلاً پله دوم خرید). */
+    fun update(assetId: String, change: (JournalEntry) -> JournalEntry): Boolean = close(assetId, change)
+
     fun clear() = synchronized(lock) {
         val list = ensure()
         list.clear()

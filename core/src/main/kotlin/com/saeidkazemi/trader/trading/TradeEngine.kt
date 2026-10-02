@@ -62,6 +62,9 @@ class TradeEngine(
     companion object {
         /** کمترین مبلغ خرید با «باقی‌مانده نقد» یک بازار (بالاتر از حداقل سفارش ۳۰۰ هزار تومانی نوبیتکس). */
         const val LEFTOVER_MIN_USD = 4.0
+        /** خرید پله‌ای با تأیید: مهلت پله دوم (روز) و رشد لازم (کسری از فاصله حد ضرر) — همان آزمون «I». */
+        const val SCALE_DAYS = 5
+        const val SCALE_TRIGGER_R = 0.5
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
 
@@ -395,7 +398,9 @@ class TradeEngine(
                 p.symbol + ": الان " + Format.pct(pnl) + " • فروش " + stopTxt +
                     (if (p.profitLockedPct > 0) " (قفل سود " + Format.num(p.profitLockedPct, 0) + "٪)" else "") +
                     " " + tpTxt +
-                    (sig?.let { " یا اگر امتیازش از " + it.score + " به " + settings.sellThreshold + " برسد" } ?: "")
+                    (sig?.let { " یا اگر امتیازش از " + it.score + " به " + settings.sellThreshold + " برسد" } ?: "") +
+                    (if (p.addPendingUsd > 0) " • پله دوم: $" + Format.num(p.addPendingUsd) + " اگر " +
+                        Format.trim(maxOf(0.0, (p.addTriggerUsd / cur - 1) * 100), 1) + "٪ دیگر بالا برود (تا " + Format.date(p.addDeadline) + ")" else "")
             )
         }
         val lastTrade = journal.all().filter { it.market == m }.maxOfOrNull { maxOf(it.openedAt, it.closedAt ?: 0L) }
@@ -1134,6 +1139,53 @@ class TradeEngine(
             }
         }
 
+        // ۶ب) پله دوم خریدهای پله‌ای: اگر قیمت تأیید کرد اضافه می‌شود؛ اگر مهلت گذشت، نقدش آزاد می‌شود
+        if (settings.autoTrade && manage) {
+            val nowMs = System.currentTimeMillis()
+            for (pos in broker.account().positions.filter { it.addPendingUsd > 0 }) {
+                if (nowMs > pos.addDeadline) {
+                    if (broker.clearPendingAdd(pos.assetId)) {
+                        notes.add("پله دوم " + pos.symbol + " خریده نشد: قیمت ظرف " + SCALE_DAYS + " روز تأیید نکرد؛ $" + Format.num(pos.addPendingUsd) + " آزاد شد.")
+                        journal.update(pos.assetId) { it.copy(scaleNote = "پله دوم لغو شد: قیمت ظرف " + SCALE_DAYS + " روز به $" + Format.price(pos.addTriggerUsd) + " نرسید") }
+                    }
+                    continue
+                }
+                val asset = assetMap[pos.assetId] ?: continue
+                val cur = priceMap[asset.id] ?: continue
+                if (!cur.isFinite() || cur <= 0 || cur < pos.addTriggerUsd) continue
+                val sig = signalMap[pos.assetId]
+                if (sig != null && (sig.newsBlocked || sig.proBlocked)) continue
+                if (irBlock(asset, buy = true) != null) continue
+                val cash = broker.account().cashByMarket[pos.market.name] ?: 0.0
+                val amt = minOf(pos.addPendingUsd, cash)
+                if (amt < LEFTOVER_MIN_USD) {
+                    broker.clearPendingAdd(pos.assetId)
+                    notes.add("پله دوم " + pos.symbol + " لغو شد: نقد کافی در این بازار نماند.")
+                    journal.update(pos.assetId) { it.copy(scaleNote = "پله دوم لغو شد (نقد کافی نبود)") }
+                    continue
+                }
+                val reason = "پله دوم خرید پله‌ای (قیمت " + Format.pct((cur / pos.avgBuyUsd - 1) * 100) + " نسبت به خرید اول؛ ورود تأیید شد)"
+                announce("BUY", asset, amt, reason)
+                val hs = halfSpread(asset, null)
+                val trade = broker.addToPosition(pos.assetId, cur * (1 + hs), amt, feeFor(asset, null, true, settings), reason)
+                if (trade != null) {
+                    buys.add(asset.symbol + " (پله دوم)")
+                    journal.update(pos.assetId) { e ->
+                        e.copy(
+                            amountUsd = e.amountUsd + amt,
+                            buyFeeUsd = e.buyFeeUsd + trade.feeUsd,
+                            qty = e.qty + trade.qty,
+                            scaleNote = "پله دوم خریده شد: $" + Format.num(amt) + " در قیمت $" + Format.price(trade.priceUsd) + " (" + Format.dateTime(trade.ts) + ")"
+                        )
+                    }
+                    maybeRealBuy(settings, asset, amt, usdIrr, notes)
+                    completed("BUY", asset, true, "پله دوم " + asset.symbol + " به مبلغ " + Format.num(amt) + " دلار (ورود تأیید شد)")
+                } else {
+                    completed("BUY", asset, false, "پله دوم " + asset.symbol + " انجام نشد")
+                }
+            }
+        }
+
         // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
         val activity = ArrayList<MarketActivity>()
         if (settings.autoTrade && manage) {
@@ -1199,7 +1251,9 @@ class TradeEngine(
                     if (usdPrice == null || !usdPrice.isFinite() || usdPrice <= 0) { skip("قیمت معتبر در دسترس نیست"); continue }
                     val budget = equity * plan.positionPct *
                         (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0)
-                    val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve
+                    // نقدی که برای پله دوم خریدهای پله‌ای کنار گذاشته شده، خرج خرید تازه نمی‌شود
+                    val pendingHere = acc.positions.filter { it.market == m }.sumOf { it.addPendingUsd }
+                    val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve - pendingHere
                     var amount = minOf(budget, available)
                     var sizeNote = ""
                     // سهم کوچک: اگر درصد هر موقعیت از حداقل معامله کمتر شد ولی نقد کافی هست، با حداقل مبلغ خرید می‌شود
@@ -1221,23 +1275,36 @@ class TradeEngine(
                             else "برای معامله در این بازار سهم آن را در تنظیمات ← تقسیم سرمایه بیشتر کنید")
                         break
                     }
+                    val stopPct = plan.stopFor(sig.metrics.volatility)
+                    // خرید پله‌ای با تأیید: نصف حالا، نصف دوم فقط اگر قیمت ظرف ۵ روز نصف فاصله حد ضرر بالا برود
+                    var firstAmt = amount
+                    var pendingAmt = 0.0
+                    var scalePart = ""
+                    if (settings.scaledEntry(m) && plan.entryMode == 0 && amount / 2 >= LEFTOVER_MIN_USD) {
+                        firstAmt = amount / 2
+                        pendingAmt = amount - firstAmt
+                        scalePart = "، پله اول از دو: نصف مبلغ؛ نصف دوم اگر تا " + SCALE_DAYS + " روز " +
+                            Format.trim(SCALE_TRIGGER_R * stopPct * 100, 1) + "٪ بالا برود"
+                    }
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
                     val rrPart = plan.plannedRR(sig.metrics.volatility).takeIf { it > 0 }?.let { "، ریسک به ریوارد ۱:" + Format.trim(it, 1) } ?: ""
-                    val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + sizeNote + ")"
-                    val stopPct = plan.stopFor(sig.metrics.volatility)
-                    announce("BUY", asset, amount, reason)
+                    val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + sizeNote + scalePart + ")"
+                    announce("BUY", asset, firstAmt, reason)
                     val hs = halfSpread(asset, null)
                     val trade = broker.buy(
                         asset = asset,
                         usdPrice = usdPrice * (1 + hs),
-                        usdAmount = amount,
+                        usdAmount = firstAmt,
                         feePct = feeFor(asset, null, true, settings),
                         stopLossUsd = usdPrice * (1 - stopPct),
                         takeProfitUsd = usdPrice * (1 + plan.tpPct),
                         reason = reason,
                         trailPct = plan.trailPct,
-                        fxRate = if (asset.baseCurrency == "IRR") usdIrr else 0.0
+                        fxRate = if (asset.baseCurrency == "IRR") usdIrr else 0.0,
+                        addPendingUsd = pendingAmt,
+                        addTriggerUsd = usdPrice * (1 + SCALE_TRIGGER_R * stopPct),
+                        addDeadline = if (pendingAmt > 0) System.currentTimeMillis() + SCALE_DAYS * 86_400_000L else 0L
                     )
                     if (trade != null) {
                         buys.add(asset.symbol)
@@ -1249,8 +1316,13 @@ class TradeEngine(
                             guardNote = if (guard.active) guard.text else null,
                             spreadPct = hs * 100
                         )
-                        maybeRealBuy(settings, asset, amount, usdIrr, notes)
-                        completed("BUY", asset, true, "خرید " + asset.symbol + " به مبلغ " + Format.num(amount) + " دلار")
+                        if (pendingAmt > 0) journal.update(asset.id) {
+                            it.copy(scaleNote = "پله دوم در انتظار: $" + Format.num(pendingAmt) + " اگر قیمت تا " + SCALE_DAYS +
+                                " روز به $" + Format.price(usdPrice * (1 + SCALE_TRIGGER_R * stopPct)) + " برسد")
+                        }
+                        maybeRealBuy(settings, asset, firstAmt, usdIrr, notes)
+                        completed("BUY", asset, true, "خرید " + asset.symbol + " به مبلغ " + Format.num(firstAmt) + " دلار" +
+                            (if (pendingAmt > 0) " (پله اول از دو)" else ""))
                     } else {
                         completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")
                     }

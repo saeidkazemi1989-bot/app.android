@@ -299,6 +299,28 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             }
         }
 
+        // خرید پله‌ای با تأیید
+        item {
+            SettingsCard("خرید پله‌ای با تأیید") {
+                Text(
+                    "نصف مبلغ هر خرید فوراً خریده می‌شود؛ نصف دوم فقط اگر قیمت ظرف ۵ روز به اندازه نصف فاصله حد ضرر بالا برود " +
+                        "(یعنی بازار جهت خرید را تأیید کند). اگر تأیید نشد، آن نصف خرج نمی‌شود و آزاد می‌شود. " +
+                        "در آزمون روی داده واقعی، برای ارز دیجیتال هم ضررهای پشت‌سرهم حدود ۳۵٪ کمتر شد و هم سود کمی بیشتر؛ " +
+                        "برای بورس ریسک نصف ولی سود حدود ۲۰٪ کمتر بود.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                for (m in listOf(
+                    com.saeidkazemi.trader.data.model.MarketKind.CRYPTO,
+                    com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK,
+                    com.saeidkazemi.trader.data.model.MarketKind.METAL
+                )) {
+                    SwitchRow(m.faTitle, state.settings.scaledEntry(m)) { vm.toggleScaledEntry(m, it) }
+                }
+            }
+        }
+
         // قفل سود
         item {
             SettingsCard("قفل سود (حفظ سود به‌دست‌آمده)") {

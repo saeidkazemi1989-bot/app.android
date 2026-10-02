@@ -174,6 +174,17 @@ private fun PositionRow(
                 color = Color(0xFFF7B731),
                 modifier = Modifier.padding(top = 2.dp)
             )
+            if (pos.addPendingUsd > 0) {
+                Text(
+                    "پله دوم: $" + Format.num(pos.addPendingUsd) + " اگر قیمت به $" + Format.price(pos.addTriggerUsd) +
+                        " برسد (تا " + Format.date(pos.addDeadline) + ")",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            } else if (pos.addedAt > 0) {
+                Text("✓ پله دوم خریده شد (ورود تأیید شد)", fontSize = 10.sp, color = pnlColor(1.0), modifier = Modifier.padding(top = 2.dp))
+            }
             if (pos.profitLockedPct > 0) {
                 Text(
                     "🔒 سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪ قفل شد",

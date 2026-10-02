@@ -160,7 +160,10 @@ class PaperBroker(private val store: JsonStore) : Broker {
         takeProfitUsd: Double,
         reason: String,
         trailPct: Double = 0.0,
-        fxRate: Double = 0.0
+        fxRate: Double = 0.0,
+        addPendingUsd: Double = 0.0,
+        addTriggerUsd: Double = 0.0,
+        addDeadline: Long = 0L
     ): Trade? = synchronized(lock) {
         val a = ensure()
         if (!usdPrice.isFinite() || usdPrice <= 0 || usdAmount <= 0) return@synchronized null
@@ -186,7 +189,10 @@ class PaperBroker(private val store: JsonStore) : Broker {
             peakUsd = usdPrice,
             trailPct = trailPct,
             costUsd = usdAmount,
-            fxRate = if (fxRate.isFinite() && fxRate > 0) fxRate else 0.0
+            fxRate = if (fxRate.isFinite() && fxRate > 0) fxRate else 0.0,
+            addPendingUsd = if (addPendingUsd.isFinite() && addPendingUsd > 0) addPendingUsd else 0.0,
+            addTriggerUsd = addTriggerUsd,
+            addDeadline = addDeadline
         )
         val trade = Trade(
             id = shortId(),
@@ -336,6 +342,60 @@ class PaperBroker(private val store: JsonStore) : Broker {
         acc = next
         store.saveAccount(next)
         newlyLocked
+    }
+
+    /**
+     * پله دوم خرید پله‌ای: به موقعیت موجود اضافه می‌کند (میانگین قیمت و بهای تمام‌شده به‌روز می‌شود؛
+     * حد ضرر و حد سود همان قبلی می‌ماند) و پله در انتظار پاک می‌شود.
+     */
+    fun addToPosition(assetId: String, usdPrice: Double, usdAmount: Double, feePct: Double, reason: String): Trade? = synchronized(lock) {
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized null
+        if (!usdPrice.isFinite() || usdPrice <= 0 || !usdAmount.isFinite() || usdAmount <= 0) return@synchronized null
+        val key = pos.market.name
+        val sleeve = a.cashByMarket[key] ?: 0.0
+        if (usdAmount > sleeve + 1e-9 || usdAmount > a.cashUsd + 1e-9) return@synchronized null
+        val fee = usdAmount * feePct
+        val addQty = (usdAmount - fee) / usdPrice
+        if (addQty <= 0) return@synchronized null
+        val now = System.currentTimeMillis()
+        val newQty = pos.qty + addQty
+        val updated = pos.copy(
+            qty = newQty,
+            avgBuyUsd = (pos.qty * pos.avgBuyUsd + addQty * usdPrice) / newQty,
+            costUsd = pos.cost() + usdAmount,
+            peakUsd = maxOf(pos.peakUsd, usdPrice),
+            addPendingUsd = 0.0,
+            addTriggerUsd = 0.0,
+            addDeadline = 0L,
+            addedAt = now
+        )
+        val trade = Trade(
+            id = shortId(), ts = now, assetId = assetId, symbol = pos.symbol, side = "BUY",
+            qty = addQty, priceUsd = usdPrice, usdValue = usdAmount, feeUsd = fee, reason = reason, mode = mode
+        )
+        val next = a.copy(
+            cashUsd = a.cashUsd - usdAmount,
+            cashByMarket = a.cashByMarket + (key to (sleeve - usdAmount).coerceAtLeast(0.0)),
+            positions = a.positions.map { if (it.assetId == assetId) updated else it },
+            trades = listOf(trade) + a.trades
+        )
+        acc = next
+        store.saveAccount(next)
+        trade
+    }
+
+    /** لغو پله دوم در انتظار (مهلت تمام شد یا نقد کافی نبود). */
+    fun clearPendingAdd(assetId: String): Boolean = synchronized(lock) {
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if (pos.addPendingUsd <= 0) return@synchronized false
+        val next = a.copy(positions = a.positions.map {
+            if (it.assetId == assetId) it.copy(addPendingUsd = 0.0, addTriggerUsd = 0.0, addDeadline = 0L) else it
+        })
+        acc = next
+        store.saveAccount(next)
+        true
     }
 
     private fun shortId(): String = UUID.randomUUID().toString().replace("-", "").take(10)
