@@ -124,7 +124,10 @@ class StrategyEngine {
         val usePro = settings.proAnalysis && pro != null
         val proAdj = if (usePro && pro != null) pro.adj else 0
         val proBlocked = usePro && pro != null && pro.blockBuy
-        val total = maxOf(0, minOf(100, technical + newsAdj + proAdj))
+        // گزارش واقعی (TTJ8-EMWH، ۱۰۳ مورد): بعد از خبر مثبت بازده نسبی ۲۴ساعته −۰٫۳۸٪ و بعد از خبر منفی +۰٫۶۲٪ بود
+        // (خبر مثبت معمولاً قبلاً در قیمت آمده). پس خبر مثبت امتیاز اضافه نمی‌کند؛ خبر منفی همچنان کم می‌کند و خرید را متوقف می‌کند.
+        val newsEff = minOf(newsAdj, 0)
+        val total = maxOf(0, minOf(100, technical + newsEff + proAdj))
         if (usePro && pro != null && pro.factors.isNotEmpty()) {
             reasons.add("تحلیل تخصصی: اثر " + ProAnalysis.signed(proAdj))
             pro.factors.filter { it.impact != 0 }.sortedByDescending { kotlin.math.abs(it.impact) }.take(4).forEach { f ->
@@ -135,7 +138,7 @@ class StrategyEngine {
         if (useNews && news != null) {
             if (news.available) {
                 val sign = if (newsAdj > 0) "+" else ""
-                reasons.add(news.label + " (" + news.items.size + " خبر، اثر " + sign + newsAdj + ")")
+                reasons.add(news.label + " (" + news.items.size + " خبر، اثر " + sign + newsAdj + (if (newsAdj > 0) "؛ خبر مثبت امتیاز اضافه نمی‌کند" else "") + ")")
                 val top = news.items
                     .filter { kotlin.math.abs(it.sentiment) >= 0.3 }
                     .maxByOrNull { kotlin.math.abs(it.sentiment) }
@@ -148,7 +151,7 @@ class StrategyEngine {
         // آستانه خرید با بک‌تست روی «امتیاز تکنیکال» تنظیم شده؛ اگر اثر مثبت اخبار/تحلیل تخصصی (تا +۳۲)
         // کامل حساب شود، آستانه عملاً پایین می‌آید (در گزارش واقعی ۴۰۷ از ۶۲۴ سهم «خرید» شده بودند).
         // پس برای تصمیم ورود، اثر مثبت حداکثر MAX_ENTRY_BOOST امتیاز است؛ اثر منفی کامل حساب می‌شود.
-        val entryScore = technical + minOf(newsAdj + proAdj, MAX_ENTRY_BOOST)
+        val entryScore = technical + minOf(newsEff + proAdj, MAX_ENTRY_BOOST)
         val weakTech = total >= buyThreshold && entryScore < buyThreshold
         if (weakTech && !(blocked || proBlocked)) {
             reasons.add("امتیاز تکنیکال (" + technical + ") برای ورود کافی نیست؛ اخبار و تحلیل تخصصی حداکثر +" + MAX_ENTRY_BOOST + " به آستانه کمک می‌کنند")

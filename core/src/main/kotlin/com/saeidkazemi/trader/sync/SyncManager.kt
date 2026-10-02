@@ -291,7 +291,15 @@ class SyncManager(private val container: AppContainer) {
                     if (message.startsWith("اینترنت")) message = ""
                 } catch (e: Exception) {
                     message = "اینترنت (سرور واسط) در دسترس نیست: " + (e.message ?: "")
-                    container.review.issue(com.saeidkazemi.trader.review.ReviewLog.AREA_SYNC, "سرور واسط اینترنتی در دسترس نبود: " + (e.message ?: ""))
+                    container.review.issue(
+                        com.saeidkazemi.trader.review.ReviewLog.AREA_SYNC,
+                        "سرور واسط اینترنتی (ntfy.sh) در دسترس نبود: " + when (e) {
+                            is java.net.UnknownHostException -> "نام سرور پیدا نشد (اینترنت قطع یا فیلتر)"
+                            is java.net.SocketTimeoutException -> "مهلت اتصال تمام شد"
+                            is java.net.ConnectException -> "اتصال برقرار نشد"
+                            else -> (e.message ?: e.javaClass.simpleName).take(60)
+                        }
+                    )
                 }
             }
             connected = System.currentTimeMillis() - lastPeerSeenAt < 90_000

@@ -477,7 +477,8 @@ class IranStockSource {
             clientTypes()
             flowError = null
         } catch (e: Exception) {
-            flowError = e.message ?: e.toString()
+            // خارج از ساعت بازار (یا روز تعطیل) جدول حقیقی/حقوقی امروز خالی است؛ این خطا نیست
+            flowError = if (IranMarket.isOpen(now)) (e.message ?: e.toString()) else null
         }
         stats = marketStats(stocks, flows.mapKeys { it.key.removePrefix("ir:") })
         val liquid = stocks.filter { it.valueIrr >= MIN_VALUE_IRR || ("ir:" + it.insCode) in mustInclude }

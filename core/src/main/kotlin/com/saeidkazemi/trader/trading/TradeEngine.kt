@@ -920,7 +920,8 @@ class TradeEngine(
             RefreshResult(market.cachedAssets(), emptyList())
         }
         val assets = result.assets
-        notes.add(dataStatusLine(assets, settings))
+        val offline = result.offline
+        if (!offline) notes.add(dataStatusLine(assets, settings))
         notes.addAll(result.notes)
         if (!IranMarket.isOpen() && assets.any { it.market == MarketKind.IR_STOCK && !it.isSimulated }) {
             notes.add("بازار بورس الان بسته است؛ سهام تحلیل می‌شوند ولی خرید و فروش آن‌ها فقط در ساعت کار بازار (شنبه تا چهارشنبه ۹ تا ۱۲:۳۰) انجام می‌شود.")
@@ -1258,7 +1259,7 @@ class TradeEngine(
                     buildActivity(m, settings, plan.maxPositions, LEFTOVER_MIN_USD, th, reserve, signals, priceMap, boughtHere, sells, skipped, stopReason)
                 )
             }
-            if (signals.isEmpty()) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")
+            if (signals.isEmpty() && !offline) notes.add("دارایی با داده کافی برای تحلیل پیدا نشد.")
         }
         if (manage) {
             lastActivity = activity

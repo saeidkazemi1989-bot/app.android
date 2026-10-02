@@ -6,7 +6,12 @@ import com.saeidkazemi.trader.data.model.MarketKind
 import com.saeidkazemi.trader.data.model.PricePoint
 import java.util.concurrent.ConcurrentHashMap
 
-class RefreshResult(val assets: List<Asset>, val notes: List<String>)
+class RefreshResult(
+    val assets: List<Asset>,
+    val notes: List<String>,
+    /** گوشی در این دور اصلاً به اینترنت دسترسی نداشت (هیچ سروری پیدا نشد). */
+    val offline: Boolean = false
+)
 
 /**
  * سرویس تجمیعی داده بازار: ارز دیجیتال، ارز خارجی، طلا و بورس تهران را از منابع مختلف گرفته،
@@ -18,6 +23,24 @@ class MarketDataService {
     private val fxSource = FxSource()
     private val goldSource = GoldSource()
     @Volatile private var goldFailAt = 0L
+
+    private suspend fun isOffline(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        OFFLINE_PROBE_HOSTS.none { h ->
+            try {
+                java.net.InetAddress.getByName(h)
+                true
+            } catch (_: java.net.UnknownHostException) {
+                false
+            } catch (_: Exception) {
+                true // خطای دیگر = نامعلوم؛ قطع حساب نمی‌شود
+            }
+        }
+    }
+
+    companion object {
+        val OFFLINE_PROBE_HOSTS = listOf("apiv2.nobitex.ir", "cdn.tsetmc.com", "api.coingecko.com")
+        const val OFFLINE_NOTE = "اینترنت دستگاه در این دور قطع بود (هیچ سروری پیدا نشد)؛ ربات منتظر وصل شدن اینترنت می‌ماند و خرید و فروشی انجام نمی‌شود."
+    }
 
     /** منبع فعلی فهرست ارزهای دیجیتال (CoinGecko یا نوبیتکس). */
     val cryptoListSource: String get() = cryptoSource.lastListSource
@@ -98,6 +121,11 @@ class MarketDataService {
         mustInclude: Set<String> = emptySet(),
         heldCrypto: List<Triple<String, String, String>> = emptyList()
     ): RefreshResult {
+        // اگر هیچ سروری (نوبیتکس، بورس، CoinGecko) حتی نامش پیدا نشود، اینترنت دستگاه قطع است:
+        // به‌جای ده خطای جداگانه یک یادداشت روشن، و این دور بدون درخواست شبکه رد می‌شود.
+        if (isOffline()) {
+            return RefreshResult(emptyList(), listOf(OFFLINE_NOTE), offline = true)
+        }
         val notes = mutableListOf<String>()
 
         val cryptoAssets = (try {

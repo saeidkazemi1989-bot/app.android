@@ -41,21 +41,37 @@ class CodalSource {
 
     class Result(val letters: List<CodalLetter>, val usedSource: String?, val failed: List<String>)
 
+    // بعد از خطا، منبع مدتی امتحان نمی‌شود (تلگرام از ایران فیلتر است؛ کدال گاهی پاسخ نمی‌دهد)
+    @Volatile private var codalFailAt = 0L
+    @Volatile private var telegramFailAt = 0L
+
     fun letters(symbol: String, limit: Int = 12): Result {
         val failed = mutableListOf<String>()
-        try {
-            val list = fromCodalApi(symbol, limit)
-            if (list.isNotEmpty()) return Result(list, "کدال", failed)
-        } catch (e: Exception) {
-            failed.add("کدال")
+        val now = System.currentTimeMillis()
+        if (now - codalFailAt > CODAL_BACKOFF_MS) {
+            try {
+                val list = fromCodalApi(symbol, limit)
+                if (list.isNotEmpty()) return Result(list, "کدال", failed)
+            } catch (e: Exception) {
+                codalFailAt = now
+                failed.add("کدال")
+            }
         }
-        try {
-            val list = fromTelegram(symbol, limit)
-            return Result(list, if (list.isNotEmpty()) "کانال کدال۳۶۰" else null, failed)
-        } catch (e: Exception) {
-            failed.add("کانال کدال۳۶۰")
+        if (now - telegramFailAt > TELEGRAM_BACKOFF_MS) {
+            try {
+                val list = fromTelegram(symbol, limit)
+                return Result(list, if (list.isNotEmpty()) "کانال کدال۳۶۰" else null, failed)
+            } catch (e: Exception) {
+                telegramFailAt = now
+                failed.add("کانال کدال۳۶۰")
+            }
         }
         return Result(emptyList(), null, failed)
+    }
+
+    companion object {
+        const val CODAL_BACKOFF_MS = 30 * 60_000L
+        const val TELEGRAM_BACKOFF_MS = 6 * 3_600_000L
     }
 
     private fun fromCodalApi(symbol: String, limit: Int): List<CodalLetter> {
