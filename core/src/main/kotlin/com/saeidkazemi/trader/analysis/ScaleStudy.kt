@@ -197,7 +197,7 @@ object ScaleStudy {
                 " مورد بی‌سود/با زیان بسته شد؛ از " + a.reached8 + " معامله با ≥۸٪ سود شناور، " + a.giveback8 + " مورد بی‌سود/زیان‌ده" else ""))
             for (r in rs) {
                 out.add("  " + r.id + ") " + r.title + ": n=" + r.all.trades + " برد " + f(r.all.winRate, 1) + "٪ • میانگین هر معامله " +
-                    f(r.all.expectancyPct) + "٪ • PF " + f(r.all.profitFactor) + " • افت " + f(r.all.maxDrawdownPct, 1) +
+                    f(r.all.expectancyPct) + "٪ • جمع " + f(r.all.trades * r.all.expectancyPct, 0) + "٪ • PF " + f(r.all.profitFactor) + " • افت " + f(r.all.maxDrawdownPct, 1) +
                     "٪ | خارج از نمونه: n=" + r.oos.trades + " برد " + f(r.oos.winRate, 1) + "٪ میانگین " + f(r.oos.expectancyPct) + "٪ PF " + f(r.oos.profitFactor))
             }
         }
