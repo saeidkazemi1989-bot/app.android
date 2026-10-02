@@ -26,7 +26,11 @@ object ScaleStudy {
         /** ورود: ۰ یک‌جا، ۱ نصف + نصف در افت (میانگین کم کردن)، ۲ نصف + نصف بعد از تأیید (بالا رفتن). */
         val entry: Int = 0,
         val entryR: Double = 0.5,
-        val entryDays: Int = 5
+        val entryDays: Int = 5,
+        /** رسیدن به حد سود: ۰ فروش، ۱ نفروش و آن نقطه را خرید جدید فرض کن (حد ضرر/سود از نو)، ۲ همان با حد ضرر نصف فاصله. */
+        val roll: Int = 0,
+        /** فاصله خرید دوباره همان دارایی بعد از خروج با حد ضرر (روز): ۰ همان لحظه، ۱ روز بعد (پیش‌فرض بک‌تست). */
+        val reGap: Int = 1
     )
 
     data class Row(
@@ -54,7 +58,12 @@ object ScaleStudy {
         Variant("G", "سه پله: ⅓ در 1R، ⅓ در 2R، بقیه با حد ضرر متحرک", partials = listOf(1.0 to 1.0 / 3, 2.0 to 0.5), beAfterPartial = true),
         Variant("H", "ورود پله‌ای: نصف + نصف در افت 0.5R (۵ روز)", entry = 1),
         Variant("I", "ورود پله‌ای: نصف + نصف بعد از 0.5R رشد (۵ روز)", entry = 2),
-        Variant("J", "ترکیبی: ورود تأییدی (I) + فروش نصف در 1R (E)", entry = 2, partials = listOf(1.0 to 0.5), beAfterPartial = true)
+        Variant("J", "ترکیبی: ورود تأییدی (I) + فروش نصف در 1R (E)", entry = 2, partials = listOf(1.0 to 0.5), beAfterPartial = true),
+        Variant("K", "در حد سود نفروش؛ آن نقطه خرید جدید (حد ضرر و سود از نو)", roll = 1),
+        Variant("L", "مثل K ولی حد ضرر جدید نصف فاصله (نزدیک‌تر)", roll = 2),
+        Variant("M", "خرید دوباره همان لحظه بعد از حد ضرر", reGap = 0),
+        Variant("N", "بعد از حد ضرر ۳ روز همان دارایی خریده نشود", reGap = 3),
+        Variant("O", "ترکیبی: ورود تأییدی (I) + نفروختن در حد سود (K)", entry = 2, roll = 1)
     )
 
     fun run(m: MarketKind, series: List<Backtest.Series>, p: Backtest.Params, settings: AppSettings): List<Row> {
@@ -100,7 +109,7 @@ object ScaleStudy {
             val stopPct = p.stopFor(s.vol[i].takeIf { it.isFinite() })
             val r = stopPct
             var stop = e0 * (1 - stopPct)
-            val tp = e0 * (1 + p.tpPct)
+            var tp = e0 * (1 + p.tpPct)
             var peak = e0
             // حساب بر حسب یک واحد سرمایه (۱ دلار) برای هر معامله
             var units = 0.0
@@ -145,6 +154,11 @@ object ScaleStudy {
                     partialIdx++
                     if (v.beAfterPartial) stop = maxOf(stop, breakEven() * 1.001)
                 }
+                // «حد سود = نقطه خرید جدید»: نمی‌فروشد، حد ضرر و حد سود را از این قیمت از نو می‌گذارد
+                if (v.roll > 0 && px >= tp && px > stop) {
+                    stop = maxOf(stop, px * (1 - (if (v.roll == 2) 0.5 else 1.0) * stopPct))
+                    tp = px * (1 + p.tpPct)
+                }
                 reason = when {
                     px <= stop -> if (stop > e0) "حد ضرر متحرک/سربه‌سر" else "حد ضرر"
                     px >= tp -> "حد سود"
@@ -168,7 +182,7 @@ object ScaleStudy {
                     peakPct = (peak / e0 - 1) * 100
                 )
             )
-            i = exitIdx + 1
+            i = if (reason.startsWith("حد ضرر")) exitIdx + v.reGap else exitIdx + 1
         }
         return out
     }

@@ -36,4 +36,13 @@ class ScaleStudyTests {
         assertEquals(50.0, net("A", px), 1e-6)
         assertEquals(25.0, net("I", px), 1e-6)
     }
+
+    @Test
+    fun rollAtTakeProfit() {
+        // حد سود ۵۰٪: K در ۱۵۰ نمی‌فروشد، حد ضرر ۱۳۵ و حد سود ۲۲۵ می‌شود
+        assertEquals(50.0, net("A", doubleArrayOf(100.0, 150.0, 160.0, 130.0)), 1e-6)
+        assertEquals(30.0, net("K", doubleArrayOf(100.0, 150.0, 160.0, 130.0)), 1e-6)
+        // دوباره به حد سود جدید (۲۲۵) رسید: حد ضرر ۲۰۷؛ خروج در ۲۰۰
+        assertEquals(100.0, net("K", doubleArrayOf(100.0, 150.0, 230.0, 200.0)), 1e-6)
+    }
 }
