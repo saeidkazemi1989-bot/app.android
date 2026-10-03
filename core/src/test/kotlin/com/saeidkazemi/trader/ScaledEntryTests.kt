@@ -99,4 +99,20 @@ class ScaleChoiceTests {
         assertEquals(22.5, p.takeProfitUsd, 1e-9)
         assertEquals(1, p.rolls)
     }
+
+    @Test
+    fun sharedCapitalLend() {
+        val broker = PaperBroker(JsonStore(Files.createTempDirectory("lend").toFile()))
+        broker.reset(100.0, mapOf("CRYPTO" to 40.0, "IR_STOCK" to 30.0, "METAL" to 30.0, "FX" to 0.0))
+        assertEquals(10.0, broker.lendCash(MarketKind.CRYPTO, MarketKind.IR_STOCK, 10.0), 1e-9)
+        val a = broker.account()
+        assertEquals(30.0, a.cashByMarket["CRYPTO"]!!, 1e-9)
+        assertEquals(40.0, a.cashByMarket["IR_STOCK"]!!, 1e-9)
+        // سرمایه پایه هم جابه‌جا شد تا سود/زیان هر بازار صفر بماند
+        assertEquals(30.0, a.capitalByMarket["CRYPTO"]!!, 1e-9)
+        assertEquals(40.0, a.capitalByMarket["IR_STOCK"]!!, 1e-9)
+        assertEquals(100.0, a.cashUsd, 1e-9)
+        // بیشتر از نقد موجود منتقل نمی‌شود
+        assertEquals(30.0, broker.lendCash(MarketKind.CRYPTO, MarketKind.METAL, 50.0), 1e-9)
+    }
 }

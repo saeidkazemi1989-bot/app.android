@@ -299,6 +299,22 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             }
         }
 
+        // سرمایه مشترک
+        item {
+            SettingsCard("سرمایه مشترک بین بازارها") {
+                Text(
+                    "روشن: اگر بازاری فرصت خرید داشت ولی نقدش تمام شده بود، از نقد بیکار بازارهای دیگر خرید می‌کند. " +
+                        "هیچ بازاری بیشتر از " + Format.num(state.settings.maxMarketSharePct, 0) + "٪ کل سرمایه را نمی‌گیرد. " +
+                        "اگر چند بازار هم‌زمان فرصت داشتند، اول بازاری می‌خرد که پیش‌بینی‌هایش در عمل دقیق‌تر بوده است. " +
+                        "تقسیم بالا فقط نقطه شروع است و خریدهای باز دست نمی‌خورند.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                SwitchRow("سرمایه مشترک (با سقف)", state.settings.sharedCapital) { vm.toggleSharedCapital(it) }
+            }
+        }
+
         // خرید پله‌ای با تأیید
         item {
             SettingsCard("روش ورود و خروج (خودکار)") {

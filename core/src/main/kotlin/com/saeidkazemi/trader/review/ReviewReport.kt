@@ -225,6 +225,10 @@ object ReviewReport {
             } ?: "—") + " • خارج از نمونه: n=" + ((if (r.applied) r.bestOut else r.currentOut)?.trades ?: 0) + " WR " + f((if (r.applied) r.bestOut else r.currentOut)?.winRate, 1) + "%")
         }
         h("آزمون ورود/خروج پله‌ای روی همان داده")
+        line("سرمایه مشترک: " + (if (settings.sharedCapital) "روشن (سقف هر بازار " + f(settings.maxMarketSharePct, 0) + "٪)" else "خاموش") +
+            " • دقت سیگنال خرید هر بازار (بازده نسبی ۲۴س): " + com.saeidkazemi.trader.data.model.MarketKind.TRADED.joinToString("، ") {
+                it.faTitle + " " + f(c.tradeEngine.marketEdge(it), 2) + "٪"
+            })
         line("انتخاب خودکار روش: " + (if (settings.autoScaleStyle) "روشن" else "خاموش (کلید دستی خرید پله‌ای: " + settings.scaledEntryMarkets.orEmpty().joinToString(",") + ")"))
         bt?.scaleChoice?.forEach { (k, v) ->
             val m = com.saeidkazemi.trader.data.model.MarketKind.values().firstOrNull { it.name == k }

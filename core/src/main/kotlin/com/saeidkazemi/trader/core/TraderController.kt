@@ -508,6 +508,13 @@ class TraderController(
         toast(if (on) "خرید پله‌ای با تأیید برای " + m.faTitle + " روشن شد (برای خریدهای جدید)." else "خرید پله‌ای " + m.faTitle + " خاموش شد؛ خریدهای جدید یک‌جا انجام می‌شوند.")
     }
 
+    /** سرمایه مشترک بین بازارها (با سقف سهم هر بازار). */
+    fun toggleSharedCapital(on: Boolean) {
+        updateSettings { it.copy(sharedCapital = on) }
+        toast(if (on) "سرمایه مشترک روشن شد؛ نقد آزاد هر بازار برای خرید در بازارهای دیگر هم استفاده می‌شود (حداکثر ۶۰٪ کل سرمایه در یک بازار)."
+            else "سرمایه مشترک خاموش شد؛ هر بازار فقط با نقد خودش خرید می‌کند.")
+    }
+
     /** انتخاب خودکار روش ورود/خروج هر بازار از آزمون روزانه. */
     fun toggleAutoScaleStyle(on: Boolean) {
         updateSettings { it.copy(autoScaleStyle = on) }

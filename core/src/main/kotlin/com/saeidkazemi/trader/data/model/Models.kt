@@ -221,7 +221,11 @@ data class AppSettings(
      */
     val scaledEntryMarkets: List<String>? = listOf("CRYPTO"),
     /** روش ورود/خروج هر بازار را خود برنامه هر روز با آزمون روی داده واقعی انتخاب کند (کلیدهای دستی بالا نادیده). */
-    val autoScaleStyle: Boolean = true
+    val autoScaleStyle: Boolean = true,
+    /** سرمایه مشترک: نقد آزاد هر بازار برای خرید در بازارهای دیگر هم استفاده می‌شود (با سقف سهم هر بازار). */
+    val sharedCapital: Boolean = true,
+    /** سقف سهم یک بازار از کل سرمایه (٪) در حالت سرمایه مشترک. */
+    val maxMarketSharePct: Double = 60.0
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

@@ -221,6 +221,50 @@ class TradeEngine(
         return System.currentTimeMillis() - pos.openedAt >= plan.maxHoldDays * 86_400_000L
     }
 
+    /**
+     * دقت واقعی سیگنال‌های خرید هر بازار (از ثبت پیش‌بینی‌ها): میانگین بازده ۲۴ساعته سیگنال‌های خرید
+     * منهای میانگین همه دارایی‌های همان بازار. داده کم ⇒ ۰. برای ترتیب استفاده از سرمایه مشترک.
+     */
+    fun marketEdge(m: MarketKind): Double {
+        val ps = review?.predictions().orEmpty().filter { it.market == m.name && it.ret1 != null }
+        if (ps.size < 30) return 0.0
+        val buys = ps.filter { it.th > 0 && it.score >= it.th }
+        if (buys.size < 15) return 0.0
+        return buys.mapNotNull { it.ret1 }.average() - ps.mapNotNull { it.ret1 }.average()
+    }
+
+    /** ترتیب خرید بازارها: در حالت سرمایه مشترک، بازاری که سیگنال‌هایش در عمل دقیق‌تر بوده اول. */
+    private fun marketOrder(settings: AppSettings): List<MarketKind> =
+        if (!settings.sharedCapital) riskManager.tradableMarkets.toList()
+        else riskManager.tradableMarkets.sortedByDescending { marketEdge(it) }
+
+    /**
+     * سرمایه مشترک: تا [need] دلار از نقد آزاد بازارهای دیگر (بعد از ذخیره نقدی و پله دوم خودشان) به بازار [m]
+     * منتقل می‌کند، به شرطی که سهم [m] از کل سرمایه از سقف تنظیمات بیشتر نشود.
+     */
+    private fun borrowCash(m: MarketKind, need: Double, settings: AppSettings, prices: Map<String, Double>): Pair<Double, List<String>> {
+        val acc = broker.account()
+        val total = MarketKind.values().sumOf { sleeveEquity(acc, it, prices) }
+        val room = total * settings.maxMarketSharePct / 100.0 - sleeveEquity(acc, m, prices)
+        val want = minOf(need, room)
+        if (want < 0.5) return 0.0 to emptyList()
+        var got = 0.0
+        val from = ArrayList<String>()
+        for (l in MarketKind.values().filter { it != m }.sortedByDescending { acc.cashByMarket[it.name] ?: 0.0 }) {
+            if (want - got < 0.01) break
+            val reservePct = try { planFor(settings, l).cashReservePct } catch (_: Exception) { 0.1 }
+            val free = (acc.cashByMarket[l.name] ?: 0.0) - sleeveEquity(acc, l, prices) * reservePct -
+                acc.positions.filter { it.market == l }.sumOf { it.addPendingUsd }
+            if (free <= 0.01) continue
+            val moved = broker.lendCash(l, m, minOf(free, want - got))
+            if (moved > 0) {
+                got += moved
+                from.add(l.faTitle + " $" + Format.num(moved))
+            }
+        }
+        return got to from
+    }
+
     /** ارزش کل (نقد + موقعیت‌ها) بخش اختصاصی یک بازار. */
     private fun sleeveEquity(acc: AccountState, m: MarketKind, prices: Map<String, Double>): Double =
         (acc.cashByMarket[m.name] ?: 0.0) + acc.positions.filter { it.market == m }
@@ -1241,7 +1285,7 @@ class TradeEngine(
         // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
         val activity = ArrayList<MarketActivity>()
         if (settings.autoTrade && manage) {
-            for (m in riskManager.tradableMarkets) {
+            for (m in marketOrder(settings)) {
                 if (settings.allocationPct(m) <= 0.0) continue
                 val plan = planFor(settings, m)
                 val skipped = LinkedHashMap<String, Int>()
@@ -1305,7 +1349,18 @@ class TradeEngine(
                         (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0)
                     // نقدی که برای پله دوم خریدهای پله‌ای کنار گذاشته شده، خرج خرید تازه نمی‌شود
                     val pendingHere = acc.positions.filter { it.market == m }.sumOf { it.addPendingUsd }
-                    val available = (acc.cashByMarket[m.name] ?: 0.0) - reserve - pendingHere
+                    var available = (acc.cashByMarket[m.name] ?: 0.0) - reserve - pendingHere
+                    // سرمایه مشترک: اگر نقد این بازار کم است، از نقد آزاد بازارهای دیگر (تا سقف سهم) قرض می‌گیرد
+                    if (settings.sharedCapital) {
+                        val desired = maxOf(budget, plan.minTradeUsd)
+                        if (available < desired) {
+                            val (got, from) = borrowCash(m, desired - maxOf(0.0, available), settings, priceMap)
+                            if (got > 0) {
+                                available += got
+                                notes.add("سرمایه مشترک: " + from.joinToString("، ") + " از نقد آزاد برای خرید " + asset.symbol + " در " + m.faTitle + " استفاده شد.")
+                            }
+                        }
+                    }
                     var amount = minOf(budget, available)
                     var sizeNote = ""
                     // سهم کوچک: اگر درصد هر موقعیت از حداقل معامله کمتر شد ولی نقد کافی هست، با حداقل مبلغ خرید می‌شود
@@ -1321,7 +1376,9 @@ class TradeEngine(
                     }
                     if (amount < LEFTOVER_MIN_USD) {
                         val held = acc.positions.count { it.market == m }
-                        stopReason = "نقد آزاد این بازار ($" + Format.num(maxOf(0.0, available)) + " پس از ذخیره نقدی) کمتر از حداقل معامله ($" +
+                        stopReason = if (settings.sharedCapital) "نقد آزاد همه بازارها کافی نیست یا سهم این بازار به سقف " +
+                            Format.num(settings.maxMarketSharePct, 0) + "٪ کل سرمایه رسیده؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها (هر بازاری)"
+                        else "نقد آزاد این بازار ($" + Format.num(maxOf(0.0, available)) + " پس از ذخیره نقدی) کمتر از حداقل معامله ($" +
                             Format.num(LEFTOVER_MIN_USD, 0) + ") است؛ " +
                             (if (held > 0) "خرید بعدی بعد از فروش یکی از " + held + " موقعیت فعلی"
                             else "برای معامله در این بازار سهم آن را در تنظیمات ← تقسیم سرمایه بیشتر کنید")

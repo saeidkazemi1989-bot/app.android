@@ -68,6 +68,26 @@ class PaperBroker(private val store: JsonStore) : Broker {
     }
 
     /**
+     * سرمایه مشترک: انتقال نقد آزاد از یک بازار به بازار دیگر (نقد و سرمایه پایه با هم جابه‌جا می‌شوند تا
+     * سود/زیان هر بازار درست بماند). @return مبلغ منتقل‌شده.
+     */
+    fun lendCash(from: MarketKind, to: MarketKind, amount: Double): Double = synchronized(lock) {
+        if (from == to || !amount.isFinite() || amount <= 0) return@synchronized 0.0
+        val a = ensure()
+        val avail = a.cashByMarket[from.name] ?: 0.0
+        val amt = minOf(amount, avail)
+        if (amt <= 1e-9) return@synchronized 0.0
+        val next = a.copy(
+            cashByMarket = a.cashByMarket + (from.name to avail - amt) + (to.name to (a.cashByMarket[to.name] ?: 0.0) + amt),
+            capitalByMarket = a.capitalByMarket + (from.name to (a.capitalByMarket[from.name] ?: 0.0) - amt) +
+                (to.name to (a.capitalByMarket[to.name] ?: 0.0) + amt)
+        )
+        acc = next
+        store.saveAccount(next)
+        amt
+    }
+
+    /**
      * تغییر تقسیم سرمایه بین بازارها **بدون** بستن خریدهای باز.
      * موقعیت‌های باز سر جایشان می‌مانند و فقط نقد آزاد طوری جابه‌جا می‌شود که سهم هر بازار (نقد + ارزش موقعیت‌ها)
      * تا حد ممکن به درصد جدید برسد. سود/زیان کل حساب تغییر نمی‌کند.
