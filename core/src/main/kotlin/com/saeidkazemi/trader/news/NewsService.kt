@@ -30,6 +30,18 @@ class NewsService(
 ) {
 
     companion object {
+
+        private val MOVE = Regex("\\b(slides?|slid|falls?|fell|drops?|dropped|jumps?|jumped|surges?|surged|soars?|soared|rises?|rose|plunges?|plunged|plummets?|plummeted|rall(y|ies|ied)|tumbles?|tumbled|climbs?|climbed|sinks?|sank|dips?|dipped|spikes?|shoots?|slumps?|slumped|crash(es|ed)?)\\b")
+        private val NUM = Regex("\\d+(\\.\\d+)?\\s?%|\\$\\s?\\d")
+        private val FA_MOVE = listOf("کاهش", "افزایش", "سقوط", "ریزش", "رشد", "جهش", "صعود", "نزول")
+
+        /** تیترهایی که فقط حرکت قیمت را گزارش می‌کنند («دوج ۸٪ ریخت»، «کاهش قیمت طلا…»). */
+        fun isPriceReport(title: String): Boolean {
+            val l = title.lowercase()
+            if (MOVE.containsMatchIn(l) && (NUM.containsMatchIn(l) || "price" in l)) return true
+            return "قیمت" in title && FA_MOVE.any { it in title }
+        }
+
         const val CACHE_MS = 20 * 60 * 1000L
         const val FAIL_CACHE_MS = 5 * 60 * 1000L
         const val MAX_ADJ = 12.0
@@ -138,14 +150,16 @@ class NewsService(
 
     /** صفحه‌های تبدیل قیمت و «پیش‌بینی قیمت» خبر نیستند و فقط نویز اضافه می‌کنند. */
     private fun isJunk(title: String): Boolean {
-        val t = title.lowercase()
-        return JUNK.any { it in t }
+        val t = title.lowercase().trim()
+        return JUNK.any { it in t } || t.startsWith("convert ") || JUNK_RE.containsMatchIn(t)
     }
 
     private val JUNK = listOf(
         "price today", "converter", "price prediction", "live price", "to usd price", "price chart",
-        "exchange rate today", "how to buy", "قیمت لحظه‌ای", "قیمت امروز"
+        "exchange rate today", "how to buy", "قیمت لحظه‌ای", "قیمت امروز", "prediction market"
     )
+    /** «Gold Price on 26 September 2026» و «… price on Sep 24, 2026» فقط گزارش قیمت روزانه‌اند. */
+    private val JUNK_RE = Regex("price on (\\d{1,2} )?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)")
 
     private fun collectGoogle(
         query: String,
@@ -189,10 +203,13 @@ class NewsService(
             val ageH = n.publishedAt?.let { t -> maxOf(0.0, (now - t) / 3_600_000.0) }
             val recency = if (ageH == null) 0.3 else 0.5.pow(ageH / HALF_LIFE_HOURS)
             val official = if (n.isOfficial) 1.6 else 1.0
-            val w = recency * official
+            // «X درصد ریخت/جهش کرد» خبر نیست، گزارش همان حرکت قیمت است (و گزارش ثبت پیش‌بینی‌ها نشان داد
+            // اثرش برعکس است): وزن نصف و هرگز به‌تنهایی باعث توقف خرید یا فروش نمی‌شود.
+            val priceReport = !n.isOfficial && isPriceReport(n.title)
+            val w = recency * official * (if (priceReport) 0.5 else 1.0)
             wSum += w
             sSum += w * n.sentiment
-            if (blockReason == null && ageH != null && ageH <= 24.0 && n.sentiment <= -0.6 &&
+            if (blockReason == null && !priceReport && ageH != null && ageH <= 24.0 && n.sentiment <= -0.6 &&
                 (n.isOfficial || n.sentiment <= -0.75)
             ) {
                 blockReason = "خبر منفی مهم در ۲۴ ساعت اخیر: «" + n.displayTitle.take(70) + "»"

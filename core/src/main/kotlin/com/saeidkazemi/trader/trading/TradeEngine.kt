@@ -1200,14 +1200,21 @@ class TradeEngine(
             val reason: String? = when {
                 curUsd <= pos.stopLossUsd && pos.profitLockedPct > 0 ->
                     "حفظ سود (قفل سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪)"
-                curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (قفل سود)"
+                curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (حفظ سود)"
+                // حد ضرری که با قله تازه بالا کشیده شده ولی هنوز زیر قیمت خرید است
+                curUsd <= pos.stopLossUsd && pos.trailPct > 0 && pos.peakUsd > pos.avgBuyUsd &&
+                    pos.stopLossUsd >= pos.peakUsd * (1 - pos.trailPct) * 0.999 ->
+                    "حد ضرر متحرک (" + Format.trim(pos.trailPct * 100, 0) + "٪ زیر بالاترین قیمت)"
                 curUsd <= pos.stopLossUsd -> "فعال شدن حد ضرر"
                 curUsd >= pos.takeProfitUsd -> "فعال شدن حد سود"
                 holdExpired(pos, settings) -> "پایان مهلت نگهداری " + planFor(settings, pos.market).maxHoldDays + " روزه (طبق بک‌تست)"
                 // یک تیتر منفی به‌تنهایی کافی نیست: جمع اثر اخبار هم باید منفی باشد، و برای طلا/دلار
                 // (که تیترهای عمومی زیادی دارند) امتیاز کلی هم باید زیر آستانه خرید رفته باشد.
+                // خبر منفی مهم فقط وقتی باعث فروش می‌شود که امتیاز کلی هم زیر آستانه خرید رفته باشد
+                // (DOGE با امتیاز ۸۶ و طلا با امتیاز ۶۴ به‌خاطر یک تیتر فروخته شدند و طلا بعدش ۷٪ رفت بالا).
+                // فقط برای بورس، که خبرش اطلاعیه رسمی کدال است، همان خبر کافی است.
                 sig != null && sig.newsBlocked && sig.newsAdj < 0 &&
-                    ((pos.market != MarketKind.METAL && pos.market != MarketKind.FX) ||
+                    (pos.market == MarketKind.IR_STOCK ||
                         sig.score < settings.buyThreshold + planFor(settings, pos.market).buyThresholdDelta) ->
                     "خروج به‌خاطر خبر منفی مهم"
                 sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
