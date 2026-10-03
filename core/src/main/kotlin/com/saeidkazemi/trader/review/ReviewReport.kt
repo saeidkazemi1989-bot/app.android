@@ -224,7 +224,12 @@ object ReviewReport {
                 "آستانه " + x.threshold + " حد سود " + f(x.tpPct * 100, 1) + "٪ حد ضرر " + f(x.minStopPct * 100, 1) + "-" + f(x.maxStopPct * 100, 1) + "٪ متحرک " + f(x.trailPct * 100, 1) + "٪ مهلت " + x.maxHoldDays + " روز فیلتر " + x.filter + " نوع " + x.mode
             } ?: "—") + " • خارج از نمونه: n=" + ((if (r.applied) r.bestOut else r.currentOut)?.trades ?: 0) + " WR " + f((if (r.applied) r.bestOut else r.currentOut)?.winRate, 1) + "%")
         }
-        h("آزمون ورود/خروج پله‌ای روی همان داده (فقط مقایسه؛ اعمال نشده)")
+        h("آزمون ورود/خروج پله‌ای روی همان داده")
+        line("انتخاب خودکار روش: " + (if (settings.autoScaleStyle) "روشن" else "خاموش (کلید دستی خرید پله‌ای: " + settings.scaledEntryMarkets.orEmpty().joinToString(",") + ")"))
+        bt?.scaleChoice?.forEach { (k, v) ->
+            val m = com.saeidkazemi.trader.data.model.MarketKind.values().firstOrNull { it.name == k }
+            line("- روش انتخاب‌شده " + (m?.faTitle ?: k) + ": " + v + ") " + (bt?.scaleWhy?.get(k) ?: ""))
+        }
         val sc = bt?.scale.orEmpty()
         if (sc.isEmpty()) line("(هنوز اجرا نشده؛ با بک‌تست بعدی انجام می‌شود)")
         com.saeidkazemi.trader.analysis.ScaleStudy.lines(sc).forEach { line(it) }

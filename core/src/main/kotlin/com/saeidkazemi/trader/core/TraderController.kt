@@ -508,6 +508,12 @@ class TraderController(
         toast(if (on) "خرید پله‌ای با تأیید برای " + m.faTitle + " روشن شد (برای خریدهای جدید)." else "خرید پله‌ای " + m.faTitle + " خاموش شد؛ خریدهای جدید یک‌جا انجام می‌شوند.")
     }
 
+    /** انتخاب خودکار روش ورود/خروج هر بازار از آزمون روزانه. */
+    fun toggleAutoScaleStyle(on: Boolean) {
+        updateSettings { it.copy(autoScaleStyle = on) }
+        toast(if (on) "انتخاب خودکار روش روشن شد؛ هر بازار با روشی معامله می‌کند که در آزمون روزانه بهتر بوده." else "انتخاب خودکار خاموش شد؛ کلیدهای دستی خرید پله‌ای اعمال می‌شوند.")
+    }
+
     fun toggleProfitLock(on: Boolean) {
         updateSettings { it.copy(profitLock = on) }
         toast(if (on) "قفل سود فعال شد." else "قفل سود غیرفعال شد؛ فقط حد ضرر عادی و متحرک اعمال می‌شود.")

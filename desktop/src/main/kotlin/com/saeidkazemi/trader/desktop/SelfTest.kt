@@ -273,6 +273,7 @@ fun runSelfTest(outDir: File): Int {
                 out("bt ${m.market.name} a=${m.assets} d=${m.days} applied=${m.applied} hit60=${m.reachedTarget} | CUR ${pp(m.current)} IN ${f(m.currentIn)} OUT ${f(m.currentOut)} | BEST ${pp(m.best)} IN ${f(m.bestIn)} OUT ${f(m.bestOut)} | exits=${m.exitMix}")
             }
             com.saeidkazemi.trader.analysis.ScaleStudy.lines(r?.scale.orEmpty()).forEach { out("scale $it") }
+            r?.scaleChoice?.forEach { (k, v) -> out("scale choice $k=$v " + (r.scaleWhy?.get(k) ?: "")) }
         }
         // ---- آزمون به‌روزرسانی داخل برنامه (خواندن version.json و دانلود APK فعلی از صفحه دانلود) ----
         try {

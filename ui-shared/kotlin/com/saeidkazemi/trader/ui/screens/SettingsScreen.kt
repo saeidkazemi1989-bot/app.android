@@ -301,22 +301,39 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
 
         // خرید پله‌ای با تأیید
         item {
-            SettingsCard("خرید پله‌ای با تأیید") {
+            SettingsCard("روش ورود و خروج (خودکار)") {
                 Text(
-                    "نصف مبلغ هر خرید فوراً خریده می‌شود؛ نصف دوم فقط اگر قیمت ظرف ۵ روز به اندازه نصف فاصله حد ضرر بالا برود " +
-                        "(یعنی بازار جهت خرید را تأیید کند). اگر تأیید نشد، آن نصف خرج نمی‌شود و آزاد می‌شود. " +
-                        "در آزمون روی داده واقعی، برای ارز دیجیتال هم ضررهای پشت‌سرهم حدود ۳۵٪ کمتر شد و هم سود کمی بیشتر؛ " +
-                        "برای بورس ریسک نصف ولی سود حدود ۲۰٪ کمتر بود.",
+                    "برنامه هر روز چند روش را روی داده واقعی همان بازار آزمایش می‌کند: خرید و فروش یک‌جا، خرید پله‌ای با تأیید، " +
+                        "بی‌ضرر کردن حد ضرر بعد از مقداری سود، و نفروختن در حد سود (تمدید). روشی فقط وقتی جای روش معمولی را می‌گیرد " +
+                        "که هم در کل و هم در داده‌های اخیر به‌طور روشن سود بیشتری داده باشد. خریدهای باز کنسل نمی‌شوند.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
-                for (m in listOf(
+                SwitchRow("انتخاب خودکار روش", state.settings.autoScaleStyle) { vm.toggleAutoScaleStyle(it) }
+                val markets = listOf(
                     com.saeidkazemi.trader.data.model.MarketKind.CRYPTO,
                     com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK,
                     com.saeidkazemi.trader.data.model.MarketKind.METAL
-                )) {
-                    SwitchRow(m.faTitle, state.settings.scaledEntry(m)) { vm.toggleScaledEntry(m, it) }
+                )
+                if (state.settings.autoScaleStyle) {
+                    val bt = state.backtest
+                    for (m in markets) {
+                        val id = bt?.scaleChoice?.get(m.name)
+                        Text(
+                            m.faTitle + ": " + (if (id == null) "در انتظار آزمون بعدی (فعلاً یک‌جا)" else com.saeidkazemi.trader.analysis.ScaleStudy.shortName(id)),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                        val why = bt?.scaleWhy?.get(m.name)
+                        if (why != null) Text(why, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+                    }
+                } else {
+                    Text("خرید پله‌ای با تأیید (دستی):", fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                    for (m in markets) {
+                        SwitchRow(m.faTitle, state.settings.scaledEntry(m)) { vm.toggleScaledEntry(m, it) }
+                    }
                 }
             }
         }

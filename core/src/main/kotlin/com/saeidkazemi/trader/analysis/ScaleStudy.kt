@@ -66,6 +66,50 @@ object ScaleStudy {
         Variant("O", "ترکیبی: ورود تأییدی (I) + نفروختن در حد سود (K)", entry = 2, roll = 1)
     )
 
+    // ---- انتخاب خودکار روش برای معامله زنده ----
+
+    /** حالت‌هایی که در معامله زنده قابل اجرا هستند. */
+    val LIVE = listOf("A", "C", "D", "I", "K", "L", "O")
+
+    fun shortName(id: String): String = when (id) {
+        "C" -> "بی‌ضرر کردن بعد از سود به اندازه فاصله حد ضرر"
+        "D" -> "بی‌ضرر کردن زود (بعد از سود به اندازه نصف فاصله حد ضرر)"
+        "I" -> "خرید پله‌ای با تأیید"
+        "K" -> "نفروختن در حد سود و تمدید حد سود/ضرر"
+        "L" -> "تمدید در حد سود با حد ضرر نزدیک‌تر"
+        "O" -> "خرید پله‌ای با تأیید + تمدید در حد سود"
+        else -> "خرید و فروش یک‌جا (معمولی)"
+    }
+
+    fun scaledEntry(id: String) = id == "I" || id == "O"
+    /** انتقال حد ضرر به سربه‌سر بعد از این مضرب فاصله حد ضرر (۰ = خاموش). */
+    fun breakEvenR(id: String) = when (id) { "C" -> 1.0; "D" -> 0.5; else -> 0.0 }
+    /** تمدید در حد سود: فاصله حد ضرر جدید بر حسب فاصله حد ضرر اولیه (۰ = در حد سود بفروش). */
+    fun rollR(id: String) = when (id) { "K", "O" -> 1.0; "L" -> 0.5; else -> 0.0 }
+
+    private fun total(s: Backtest.Stats) = s.trades * s.expectancyPct
+
+    /**
+     * فقط وقتی روشی جای «یک‌جا» را می‌گیرد که: جمع سودش روشن بیشتر باشد (حداقل ۱۰٪ و ۲۰ واحد)،
+     * در داده‌های اخیر (خارج از نمونه) هم بدتر نباشد و افت سرمایه‌اش خیلی بیشتر نشود. داده کم ⇒ یک‌جا.
+     */
+    fun choose(rows: List<Row>): Pair<String, String> {
+        val a = rows.firstOrNull { it.id == "A" } ?: return "A" to "آزمون انجام نشد"
+        if (a.all.trades < 30 || a.oos.trades < 10) return "A" to ("داده کافی نیست (" + a.all.trades + " معامله)؛ همان روش معمولی")
+        val base = total(a.all)
+        val best = rows.filter { it.id in LIVE && it.id != "A" }
+            .filter {
+                total(it.all) >= base + maxOf(20.0, kotlin.math.abs(base) * 0.10) &&
+                    total(it.oos) >= total(a.oos) &&
+                    it.all.maxDrawdownPct <= a.all.maxDrawdownPct * 1.25 + 1.0
+            }
+            .maxByOrNull { total(it.all) }
+        fun f(x: Double) = Math.round(x).toString()
+        return if (best == null) "A" to ("هیچ روشی به‌طور روشن بهتر نبود (یک‌جا: جمع سود " + f(base) + "٪)")
+        else best.id to (shortName(best.id) + ": جمع سود " + f(total(best.all)) + "٪ در برابر " + f(base) +
+            "٪ روش معمولی؛ داده‌های اخیر " + f(total(best.oos)) + "٪ در برابر " + f(total(a.oos)) + "٪")
+    }
+
     fun run(m: MarketKind, series: List<Backtest.Series>, p: Backtest.Params, settings: AppSettings): List<Row> {
         if (series.isEmpty()) return emptyList()
         val allT = series.flatMap { listOf(it.t.first(), it.t.last()) }

@@ -185,6 +185,9 @@ private fun PositionRow(
             } else if (pos.addedAt > 0) {
                 Text("✓ پله دوم خریده شد (ورود تأیید شد)", fontSize = 10.sp, color = pnlColor(1.0), modifier = Modifier.padding(top = 2.dp))
             }
+            if (pos.rolls > 0) {
+                Text("↻ " + pos.rolls + " بار به حد سود رسید و تمدید شد (فروخته نشد)", fontSize = 10.sp, color = pnlColor(1.0), modifier = Modifier.padding(top = 2.dp))
+            }
             if (pos.profitLockedPct > 0) {
                 Text(
                     "🔒 سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪ قفل شد",

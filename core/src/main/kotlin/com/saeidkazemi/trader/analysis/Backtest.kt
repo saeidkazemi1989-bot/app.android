@@ -163,7 +163,10 @@ object Backtest {
         val results: List<MarketResult> = emptyList(),
         val notes: List<String> = emptyList(),
         /** مطالعه ورود/خروج پله‌ای روی همان داده (فقط گزارش؛ روی معاملات اعمال نمی‌شود). */
-        val scale: List<ScaleStudy.Row>? = null
+        val scale: List<ScaleStudy.Row>? = null,
+        /** روش ورود/خروج انتخاب‌شده برای هر بازار (کد حالت ScaleStudy) و دلیلش. */
+        val scaleChoice: Map<String, String>? = null,
+        val scaleWhy: Map<String, String>? = null
     ) {
         fun appliedFor(m: MarketKind): Params? = results.firstOrNull { it.market == m && it.applied }?.best
     }

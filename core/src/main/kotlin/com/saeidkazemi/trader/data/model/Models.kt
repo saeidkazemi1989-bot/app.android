@@ -127,7 +127,11 @@ data class Position(
     val addTriggerUsd: Double = 0.0,
     val addDeadline: Long = 0L,
     /** پله دوم خریده شد (زمان)؛ ۰ یعنی نه. */
-    val addedAt: Long = 0L
+    val addedAt: Long = 0L,
+    /** فاصله حد ضرر اولیه از قیمت خرید (کسری، مثل ۰٫۰۶) برای «بی‌ضرر کردن» و «تمدید در حد سود»؛ ۰ = نامعلوم. */
+    val riskPct: Double = 0.0,
+    /** چند بار در حد سود نفروخت و حد سود/ضرر تمدید شد. */
+    val rolls: Int = 0
 ) {
     /** بهای تمام‌شده برای محاسبه سود/زیان واقعی (با کارمزد خرید). */
     fun cost(): Double = if (costUsd > 0) costUsd else qty * avgBuyUsd
@@ -215,7 +219,9 @@ data class AppSettings(
      * بازارهایی که «خرید پله‌ای با تأیید» دارند: نصف مبلغ خرید فوراً، نصف دوم فقط اگر قیمت ظرف ۵ روز
      * به اندازه نصف فاصله حد ضرر بالا برود (آزمون پله‌ای روی داده واقعی گوشی برای ارز دیجیتال بهتر بود).
      */
-    val scaledEntryMarkets: List<String>? = listOf("CRYPTO")
+    val scaledEntryMarkets: List<String>? = listOf("CRYPTO"),
+    /** روش ورود/خروج هر بازار را خود برنامه هر روز با آزمون روی داده واقعی انتخاب کند (کلیدهای دستی بالا نادیده). */
+    val autoScaleStyle: Boolean = true
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

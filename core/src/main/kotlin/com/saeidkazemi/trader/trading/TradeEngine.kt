@@ -104,6 +104,11 @@ class TradeEngine(
         return Backtest.applyTo(base, p, settings.buyThreshold)
     }
 
+    /** روش ورود/خروج فعال یک بازار (کد ScaleStudy): خودکار از آزمون روزانه، یا کلید دستی خرید پله‌ای. */
+    fun styleFor(settings: AppSettings, m: MarketKind): String =
+        if (settings.autoScaleStyle) backtest?.scaleChoice?.get(m.name) ?: "A"
+        else if (settings.scaledEntry(m)) "I" else "A"
+
     // ---- بک‌تست روزانه ----
 
     @Volatile
@@ -125,7 +130,7 @@ class TradeEngine(
         if (backtestRunning) return
         val last = backtest?.createdAt ?: 0L
         // نسخه‌های قبل مطالعه پله‌ای نداشتند: یک بار زودتر تکرار می‌شود
-        if (System.currentTimeMillis() - last < 24 * 3_600_000L && backtest?.scale != null) return
+        if (System.currentTimeMillis() - last < 24 * 3_600_000L && backtest?.scaleChoice != null) return
         if (market.cachedAssets().isEmpty()) return
         bgScope.launch {
             try {
@@ -185,7 +190,15 @@ class TradeEngine(
                 }
             }
             if (results.isEmpty() && backtest != null) return backtest
-            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale)
+            // انتخاب روش ورود/خروج هر بازار؛ بازاری که امروز آزمون نشد، انتخاب قبلی‌اش را نگه می‌دارد
+            val choice = HashMap<String, String>(backtest?.scaleChoice.orEmpty())
+            val why = HashMap<String, String>(backtest?.scaleWhy.orEmpty())
+            for ((m, rows) in scale.groupBy { it.market }) {
+                val (id, reason) = com.saeidkazemi.trader.analysis.ScaleStudy.choose(rows)
+                choice[m.name] = id
+                why[m.name] = reason
+            }
+            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale, choice, why)
             backtest = report
             store.saveBacktest(report)
             if (results.any { it.applied }) {
@@ -382,7 +395,8 @@ class TradeEngine(
         val free = (acc.cashByMarket[m.name] ?: 0.0)
         details.add(
             "موقعیت‌ها " + held.size + " از " + maxPositions + " • نقد آزاد $" + Format.num(free) +
-                " (ذخیره $" + Format.num(reserve) + ") • آستانه خرید " + th
+                " (ذخیره $" + Format.num(reserve) + ") • آستانه خرید " + th +
+                " • روش: " + com.saeidkazemi.trader.analysis.ScaleStudy.shortName(styleFor(settings, m))
         )
         // فاصله هر موقعیت تا فروش
         for (p in held.take(6)) {
@@ -1095,6 +1109,44 @@ class TradeEngine(
             }
         }
 
+        // ۵ب) روش خروج انتخاب‌شده هر بازار: «بی‌ضرر کردن» بعد از مقداری سود، یا «تمدید در حد سود» به‌جای فروش
+        if (manage) {
+            for (pos in broker.account().positions) {
+                val style = styleFor(settings, pos.market)
+                val beR = com.saeidkazemi.trader.analysis.ScaleStudy.breakEvenR(style)
+                val rollR = com.saeidkazemi.trader.analysis.ScaleStudy.rollR(style)
+                if (beR <= 0 && rollR <= 0) continue
+                val cur = priceMap[pos.assetId] ?: continue
+                if (!cur.isFinite() || cur <= 0) continue
+                val plan = planFor(settings, pos.market)
+                val r = pos.riskPct.takeIf { it > 0 }
+                    ?: (1 - pos.stopLossUsd / pos.avgBuyUsd).takeIf { pos.stopLossUsd < pos.avgBuyUsd && it > 0.005 }
+                    ?: plan.stopFor(null)
+                val a = assetMap[pos.assetId]
+                if (beR > 0) {
+                    val peak = maxOf(pos.peakUsd, cur)
+                    if (peak >= pos.avgBuyUsd * (1 + beR * r)) {
+                        val sf = feeFor(a, pos.market, false, settings) + halfSpread(a, pos.market)
+                        val be = pos.cost() / pos.qty / (1 - sf) * 1.001
+                        if (be < cur && broker.raiseStop(pos.assetId, be)) {
+                            notes.add("بی‌ضرر کردن " + pos.symbol + ": سود به " + Format.pct((peak / pos.avgBuyUsd - 1) * 100) +
+                                " رسید؛ حد ضرر روی $" + Format.price(be) + " (نقطه بی‌ضرر با کارمزد) رفت.")
+                            journal.update(pos.assetId) { it.copy(scaleNote = listOfNotNull(it.scaleNote, "حد ضرر به نقطه بی‌ضرر رفت (" + Format.dateTime(System.currentTimeMillis()) + ")").joinToString(" • ")) }
+                        }
+                    }
+                }
+                if (rollR > 0 && cur >= pos.takeProfitUsd && cur > pos.stopLossUsd && plan.tpPct > 0) {
+                    val newStop = cur * (1 - rollR * r)
+                    val newTp = cur * (1 + plan.tpPct)
+                    if (broker.rollTarget(pos.assetId, newStop, newTp)) {
+                        notes.add("تمدید " + pos.symbol + ": به حد سود رسید ولی طبق آزمون فروخته نشد؛ این نقطه مثل خرید جدید حساب شد — حد ضرر $" +
+                            Format.price(maxOf(newStop, pos.stopLossUsd)) + " و حد سود تازه $" + Format.price(newTp) + ".")
+                        journal.update(pos.assetId) { it.copy(scaleNote = listOfNotNull(it.scaleNote, "تمدید در حد سود در $" + Format.price(cur) + " (" + Format.dateTime(System.currentTimeMillis()) + ")").joinToString(" • ")) }
+                    }
+                }
+            }
+        }
+
         // ۶) مدیریت ریسک و فروش موقعیت‌های باز
         for (pos in if (manage) broker.account().positions else emptyList()) {
             val asset = assetMap[pos.assetId] ?: continue
@@ -1280,7 +1332,7 @@ class TradeEngine(
                     var firstAmt = amount
                     var pendingAmt = 0.0
                     var scalePart = ""
-                    if (settings.scaledEntry(m) && plan.entryMode == 0 && amount / 2 >= LEFTOVER_MIN_USD) {
+                    if (com.saeidkazemi.trader.analysis.ScaleStudy.scaledEntry(styleFor(settings, m)) && plan.entryMode == 0 && amount / 2 >= LEFTOVER_MIN_USD) {
                         firstAmt = amount / 2
                         pendingAmt = amount - firstAmt
                         scalePart = "، پله اول از دو: نصف مبلغ؛ نصف دوم اگر تا " + SCALE_DAYS + " روز " +
@@ -1304,7 +1356,8 @@ class TradeEngine(
                         fxRate = if (asset.baseCurrency == "IRR") usdIrr else 0.0,
                         addPendingUsd = pendingAmt,
                         addTriggerUsd = usdPrice * (1 + SCALE_TRIGGER_R * stopPct),
-                        addDeadline = if (pendingAmt > 0) System.currentTimeMillis() + SCALE_DAYS * 86_400_000L else 0L
+                        addDeadline = if (pendingAmt > 0) System.currentTimeMillis() + SCALE_DAYS * 86_400_000L else 0L,
+                        riskPct = stopPct
                     )
                     if (trade != null) {
                         buys.add(asset.symbol)
@@ -1396,7 +1449,8 @@ class TradeEngine(
             takeProfitUsd = usdPrice * (1 + plan.tpPct),
             reason = "خرید دستی",
             trailPct = plan.trailPct,
-            fxRate = if (asset.baseCurrency == "IRR") market.usdIrr(settings) else 0.0
+            fxRate = if (asset.baseCurrency == "IRR") market.usdIrr(settings) else 0.0,
+            riskPct = stopPct
         )
         if (trade == null) {
             completed("BUY", asset, false, "خرید " + asset.symbol + " انجام نشد")

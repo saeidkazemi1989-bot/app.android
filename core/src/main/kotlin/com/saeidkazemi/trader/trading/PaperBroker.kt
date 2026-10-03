@@ -163,7 +163,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
         fxRate: Double = 0.0,
         addPendingUsd: Double = 0.0,
         addTriggerUsd: Double = 0.0,
-        addDeadline: Long = 0L
+        addDeadline: Long = 0L,
+        riskPct: Double = 0.0
     ): Trade? = synchronized(lock) {
         val a = ensure()
         if (!usdPrice.isFinite() || usdPrice <= 0 || usdAmount <= 0) return@synchronized null
@@ -192,7 +193,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
             fxRate = if (fxRate.isFinite() && fxRate > 0) fxRate else 0.0,
             addPendingUsd = if (addPendingUsd.isFinite() && addPendingUsd > 0) addPendingUsd else 0.0,
             addTriggerUsd = addTriggerUsd,
-            addDeadline = addDeadline
+            addDeadline = addDeadline,
+            riskPct = if (riskPct.isFinite() && riskPct > 0) riskPct else 0.0
         )
         val trade = Trade(
             id = shortId(),
@@ -327,6 +329,31 @@ class PaperBroker(private val store: JsonStore) : Broker {
      * قفل سود: حد ضرر را به [stopUsd] می‌برد (فقط اگر بالاتر از حد فعلی باشد؛ هیچ‌وقت پایین نمی‌آورد)
      * و درصد سود قفل‌شده را ثبت می‌کند. خروجی: true اگر قفل تازه فعال شد.
      */
+    /** فقط بالا بردن حد ضرر (مثلاً بی‌ضرر کردن). true اگر تغییر کرد. */
+    fun raiseStop(assetId: String, stopUsd: Double): Boolean = synchronized(lock) {
+        if (!stopUsd.isFinite() || stopUsd <= 0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if (stopUsd <= pos.stopLossUsd * 1.0000001) return@synchronized false
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) it.copy(stopLossUsd = stopUsd) else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
+    /** تمدید در حد سود: نمی‌فروشد؛ حد ضرر (فقط بالا) و حد سود تازه. */
+    fun rollTarget(assetId: String, stopUsd: Double, takeProfitUsd: Double): Boolean = synchronized(lock) {
+        if (!stopUsd.isFinite() || !takeProfitUsd.isFinite() || takeProfitUsd <= 0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if (takeProfitUsd <= pos.takeProfitUsd) return@synchronized false
+        val updated = pos.copy(stopLossUsd = maxOf(pos.stopLossUsd, stopUsd), takeProfitUsd = takeProfitUsd, rolls = pos.rolls + 1)
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) updated else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
     fun lockProfit(assetId: String, stopUsd: Double, keepPct: Double): Boolean = synchronized(lock) {
         if (!stopUsd.isFinite() || stopUsd <= 0) return@synchronized false
         val a = ensure()
