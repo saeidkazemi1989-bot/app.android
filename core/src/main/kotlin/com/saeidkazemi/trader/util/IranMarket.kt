@@ -34,6 +34,34 @@ object IranMarket {
         return !t.isBefore(OPEN) && t.isBefore(CLOSE)
     }
 
+    /** شروع جلسه معاملاتی بعدی (اگر الان باز است، همین الان). */
+    fun nextOpenMs(nowMs: Long = System.currentTimeMillis()): Long {
+        if (isOpen(nowMs)) return nowMs
+        var z = ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZONE)
+        var d = z.toLocalDate()
+        if (!z.toLocalTime().isBefore(OPEN)) d = d.plusDays(1)
+        while (!isTradingDay(d)) d = d.plusDays(1)
+        return d.atTime(OPEN).atZone(ZONE).toInstant().toEpochMilli()
+    }
+
+    private val FA_DAYS = mapOf(
+        DayOfWeek.SATURDAY to "شنبه", DayOfWeek.SUNDAY to "یکشنبه", DayOfWeek.MONDAY to "دوشنبه",
+        DayOfWeek.TUESDAY to "سه‌شنبه", DayOfWeek.WEDNESDAY to "چهارشنبه", DayOfWeek.THURSDAY to "پنجشنبه",
+        DayOfWeek.FRIDAY to "جمعه"
+    )
+
+    /** مثل «دوشنبه ساعت ۹:۰۰» برای جلسه بعدی. */
+    fun nextOpenText(nowMs: Long = System.currentTimeMillis()): String {
+        val z = ZonedDateTime.ofInstant(Instant.ofEpochMilli(nextOpenMs(nowMs)), ZONE)
+        return (FA_DAYS[z.dayOfWeek] ?: "") + " ساعت ۹:۰۰"
+    }
+
+    /** ساعت به وقت تهران مثل 12:27 */
+    fun clock(ts: Long): String {
+        val z = ZonedDateTime.ofInstant(Instant.ofEpochMilli(ts), ZONE)
+        return String.format("%02d:%02d", z.hour, z.minute)
+    }
+
     /** امروز به وقت تهران به شکل عدد yyyymmdd (مثل ۲۰۲۶۰۹۲۵). */
     fun todayInt(nowMs: Long = System.currentTimeMillis()): Int {
         val d = ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZONE).toLocalDate()

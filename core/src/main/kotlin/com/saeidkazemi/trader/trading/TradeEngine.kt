@@ -450,7 +450,7 @@ class TradeEngine(
             val toStop = (p.stopLossUsd / cur - 1) * 100
             val toTp = (p.takeProfitUsd / cur - 1) * 100
             val sig = mine.firstOrNull { it.assetId == p.assetId }
-            val stopTxt = if (toStop < 0) "اگر " + Format.num(-toStop, 1) + "٪ دیگر افت کند" else "زیر حد ضرر است و در اولین فرصت ممکن"
+            val stopTxt = if (toStop < 0) "اگر " + Format.num(-toStop, 1) + "٪ دیگر افت کند" else stopHitText(p)
             val tpTxt = if (toTp > 0) "یا اگر " + Format.num(toTp, 1) + "٪ دیگر رشد کند" else "به حد سود رسیده"
             details.add(
                 p.symbol + ": الان " + Format.pct(pnl) + " • فروش " + stopTxt +
@@ -514,6 +514,26 @@ class TradeEngine(
     }
 
     /** دلیل ممنوعیت معامله سهام در این لحظه (بسته بودن بازار یا صف)، یا null اگر مجاز است. */
+    /** توضیح دقیق برای موقعیتی که قیمتش زیر حد ضرر است ولی هنوز فروخته نشده. */
+    private fun stopHitText(p: com.saeidkazemi.trader.data.model.Position): String {
+        val ir = p.market == MarketKind.IR_STOCK || p.assetId.startsWith("ir:")
+        val sb = StringBuilder("زیر حد ضرر است")
+        if (p.stopHitAt > 0) {
+            sb.append(" (از ").append(IranMarket.clock(p.stopHitAt))
+            if (!p.stopHitOpen && ir) sb.append("، وقتی بازار بسته بود")
+            sb.append(")")
+        }
+        if (p.trailPct > 0 && p.peakUsd > p.avgBuyUsd && p.stopLossUsd > p.avgBuyUsd * 0.999) {
+            sb.append("؛ حد ضرر را حد ضرر متحرک بالا برده بود (بالاترین قیمت ")
+                .append(Format.pct((p.peakUsd / p.avgBuyUsd - 1) * 100))
+            if (p.peakAt > 0) sb.append(" در ").append(Format.dateTime(p.peakAt))
+            sb.append(")")
+        }
+        if (ir && !IranMarket.isOpen()) sb.append("؛ ").append(IranMarket.nextOpenText()).append(" اگر هنوز زیر حد ضرر باشد فروخته می‌شود و اگر برگشته باشد نگه داشته می‌شود")
+        else sb.append("؛ در اولین فرصت فروخته می‌شود")
+        return sb.toString()
+    }
+
     private fun irBlock(asset: Asset, buy: Boolean): String? {
         // سهام و صندوق‌های طلای بورسی (هر دو در TSETMC با شناسه ir:)
         if (asset.market != MarketKind.IR_STOCK && !asset.id.startsWith("ir:")) return null
@@ -1221,18 +1241,31 @@ class TradeEngine(
                 sig != null && sig.score <= settings.sellThreshold && planFor(settings, pos.market).entryMode == 0 -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
                 else -> null
             }
+            val belowStop = curUsd <= pos.stopLossUsd
+            if (!belowStop && pos.stopHitAt > 0) broker.markStopHit(pos.assetId, 0L, false)
             if (reason != null) {
                 val blocked = irBlock(asset, buy = false)
                 if (blocked != null) {
-                    if (IranMarket.isOpen()) notes.add("فروش " + pos.symbol + " (" + reason + ") ممکن نشد: " + blocked + ".")
+                    val open = IranMarket.isOpen()
+                    if (open) notes.add("فروش " + pos.symbol + " (" + reason + ") ممکن نشد: " + blocked + ".")
+                    if (belowStop && broker.markStopHit(pos.assetId, System.currentTimeMillis(), open) && !open) {
+                        notes.add(
+                            pos.symbol + " زیر حد ضرر رفت ولی بازار بورس بسته است؛ " + IranMarket.nextOpenText() +
+                                " اگر هنوز زیر حد ضرر باشد فروخته می‌شود."
+                        )
+                    }
                     continue
                 }
-                announce("SELL", asset, pos.qty * curUsd, reason)
+                val why = if (belowStop && pos.stopHitAt > 0 && System.currentTimeMillis() - pos.stopHitAt > 10 * 60_000L)
+                    reason + " — از " + Format.dateTime(pos.stopHitAt) + " زیر حد ضرر بود" +
+                        (if (!pos.stopHitOpen) " ولی بازار بسته بود؛ در اولین جلسه بعدی فروخته شد" else "")
+                else reason
+                announce("SELL", asset, pos.qty * curUsd, why)
                 val hs = halfSpread(asset, null)
-                val trade = broker.sell(pos.assetId, curUsd * (1 - hs), feeFor(asset, null, false, settings), reason)
+                val trade = broker.sell(pos.assetId, curUsd * (1 - hs), feeFor(asset, null, false, settings), why)
                 if (trade != null) {
                     sells.add(pos.symbol)
-                    journalClose(pos, asset, trade, reason, sig, spreadPct = hs * 100)
+                    journalClose(pos, asset, trade, why, sig, spreadPct = hs * 100)
                     val pnl = trade.usdValue - trade.feeUsd - pos.cost()
                     maybeRealSell(settings, asset, pos.qty, notes)
                     completed("SELL", asset, true, "فروش " + pos.symbol + " — " + reason, pnl)

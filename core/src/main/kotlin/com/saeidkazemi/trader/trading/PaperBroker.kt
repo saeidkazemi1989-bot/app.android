@@ -325,7 +325,7 @@ class PaperBroker(private val store: JsonStore) : Broker {
             if (!px.isFinite() || px <= 0) return@map p
             val peak = maxOf(if (p.peakUsd > 0) p.peakUsd else p.avgBuyUsd, px)
             var next = p
-            if (peak > p.peakUsd + 1e-12) { next = next.copy(peakUsd = peak); changed = true }
+            if (peak > p.peakUsd + 1e-12) { next = next.copy(peakUsd = peak, peakAt = System.currentTimeMillis()); changed = true }
             if (p.trailPct > 0) {
                 val trailStop = peak * (1 - p.trailPct)
                 // فقط وقتی حد ضرر را بالا می‌کشیم که حداقل به نقطه سربه‌سر (با کارمزد) نزدیک شده باشد یا بالاتر از حد قبلی باشد
@@ -368,6 +368,22 @@ class PaperBroker(private val store: JsonStore) : Broker {
         val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
         if (takeProfitUsd <= pos.takeProfitUsd) return@synchronized false
         val updated = pos.copy(stopLossUsd = maxOf(pos.stopLossUsd, stopUsd), takeProfitUsd = takeProfitUsd, rolls = pos.rolls + 1)
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) updated else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
+    /**
+     * ثبت (یا پاک کردن با at=0) لحظه‌ای که قیمت زیر حد ضرر رفت ولی فروش ممکن نبود؛
+     * فقط برای توضیح در گزارش و ژورنال است و روی منطق فروش اثری ندارد.
+     */
+    fun markStopHit(assetId: String, at: Long, marketOpen: Boolean): Boolean = synchronized(lock) {
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        if (at > 0 && pos.stopHitAt > 0) return@synchronized false
+        if (at == 0L && pos.stopHitAt == 0L) return@synchronized false
+        val updated = pos.copy(stopHitAt = at, stopHitOpen = at > 0 && marketOpen)
         val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) updated else it })
         acc = next
         store.saveAccount(next)

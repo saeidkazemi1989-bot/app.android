@@ -180,7 +180,9 @@ object ReviewReport {
             line(
                 p.symbol + " (" + p.market.faTitle + ") خرید " + t(p.openedAt) + " @ $" + Format.price(p.avgBuyUsd) + " • الان " + (cur?.let { "$" + Format.price(it) } ?: "—") +
                     " (" + sp(cur?.let { (it / p.avgBuyUsd - 1) * 100 }) + ") • حد ضرر $" + Format.price(p.stopLossUsd) + " • حد سود $" + Format.price(p.takeProfitUsd) +
-                    (if (p.profitLockedPct > 0) " • قفل سود " + f(p.profitLockedPct, 0) + "٪" else "") + (je?.score?.let { " • امتیاز ورود $it" } ?: "")
+                    (if (p.profitLockedPct > 0) " • قفل سود " + f(p.profitLockedPct, 0) + "٪" else "") + (je?.score?.let { " • امتیاز ورود $it" } ?: "") +
+                    (if (p.peakUsd > 0 && p.avgBuyUsd > 0) " • قله " + sp((p.peakUsd / p.avgBuyUsd - 1) * 100) + (if (p.peakAt > 0) " (" + t(p.peakAt) + ")" else "") else "") +
+                    (if (p.stopHitAt > 0) " • زیر حد ضرر از " + t(p.stopHitAt) + (if (p.stopHitOpen) " (بازار باز)" else " (بازار بسته)") else "")
             )
         }
         if (acc.positions.isEmpty()) line("(ندارد)")

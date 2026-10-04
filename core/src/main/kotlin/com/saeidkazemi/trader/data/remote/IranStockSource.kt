@@ -506,7 +506,11 @@ class IranStockSource {
         val goldFunds = all.values
             .filter { it.isGoldFund && it.price > 0 && (it.valueIrr >= MIN_VALUE_IRR || ("ir:" + it.insCode) in mustInclude) }
             .sortedByDescending { it.valueIrr }
-            .take(MAX_GOLD_FUNDS)
+            .let { list ->
+                // صندوق‌های داخل پرتفوی همیشه می‌مانند (حتی خارج از ۸ صندوق پرمعامله) تا حد ضررشان بررسی شود
+                val top = list.take(MAX_GOLD_FUNDS)
+                top + list.drop(MAX_GOLD_FUNDS).filter { ("ir:" + it.insCode) in mustInclude }
+            }
             .mapIndexed { idx, q ->
                 Asset(
                     id = "ir:" + q.insCode,
