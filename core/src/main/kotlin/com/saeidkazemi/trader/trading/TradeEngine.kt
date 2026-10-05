@@ -118,7 +118,7 @@ class TradeEngine(
     fun topUpFor(settings: AppSettings, m: MarketKind): Boolean {
         if (!settings.topUpWinners) return false
         if (!settings.topUpSmart) return true
-        return backtest?.topUpOn?.get(m.name) == true
+        return backtest?.topUpOn?.get(m.name) != false
     }
 
     fun styleFor(settings: AppSettings, m: MarketKind): String =

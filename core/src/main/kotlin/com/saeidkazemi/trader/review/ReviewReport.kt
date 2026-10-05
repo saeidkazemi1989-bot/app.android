@@ -238,7 +238,7 @@ object ReviewReport {
             val w = bt?.guardWhy?.get(m.name) ?: continue
             line("- بی‌ضرر کردن " + m.faTitle + ": " + w)
         }
-        line("افزودن به خرید قبلی: " + (if (!settings.topUpWinners) "خاموش" else if (settings.topUpSmart) "روشن (فقط با تأیید آزمون)" else "روشن (همه بازارها)"))
+        line("افزودن به خرید قبلی: " + (if (!settings.topUpWinners) "خاموش" else if (settings.topUpSmart) "روشن (جز جایی که آزمون نشان دهد ضرر دارد)" else "روشن (همه بازارها)"))
         for (m in com.saeidkazemi.trader.data.model.MarketKind.TRADED) {
             val w = bt?.topUpWhy?.get(m.name) ?: continue
             line("- افزودن " + m.faTitle + ": " + w)

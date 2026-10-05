@@ -360,15 +360,15 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                 Text(
                     "اگر دارایی‌ای که خریده‌ایم حداقل ۳٪ در سود باشد و دوباره سیگنال خرید بدهد و نقد آزاد باشد، نصف مبلغ خرید اول " +
                         "به همان خرید اضافه می‌شود (یک بار، و کل آن دارایی حداکثر یک‌ونیم برابر سهم یک خرید). " +
-                        "چون پول بیشتری روی یک دارایی می‌رود، در حالت هوشمند فقط در بازاری اجرا می‌شود که آزمون روزانه روی داده واقعی " +
-                        "نشان دهد سود را بیشتر می‌کند.",
+                        "در حالت هوشمند فقط در بازاری اجرا نمی‌شود که آزمون روزانه روی داده واقعی نشان دهد " +
+                        "سود را روشن کم می‌کند یا ضرر احتمالی را خیلی بزرگ می‌کند.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
                 SwitchRow("افزودن به خرید قبلی", state.settings.topUpWinners) { vm.toggleTopUp(it) }
                 if (state.settings.topUpWinners) {
-                    SwitchRow("فقط جایی که آزمون نشان دهد سود را بیشتر می‌کند", state.settings.topUpSmart) { vm.toggleTopUpSmart(it) }
+                    SwitchRow("جز جایی که آزمون نشان دهد سود را کم می‌کند", state.settings.topUpSmart) { vm.toggleTopUpSmart(it) }
                     if (state.settings.topUpSmart) {
                         val bt = state.backtest
                         for (m in listOf(
@@ -376,14 +376,14 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                             com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK,
                             com.saeidkazemi.trader.data.model.MarketKind.METAL
                         )) {
-                            val on = bt?.topUpOn?.get(m.name) == true
+                            val on = bt?.topUpOn?.get(m.name) != false
                             Text(
                                 m.faTitle + ": " + (if (on) "اضافه می‌کند" else "اضافه نمی‌کند"),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(top = 6.dp)
                             )
-                            val why = bt?.topUpWhy?.get(m.name) ?: "در انتظار آزمون بعدی"
+                            val why = bt?.topUpWhy?.get(m.name) ?: "در انتظار آزمون بعدی (فعلاً اضافه می‌کند)"
                             Text(why, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
                         }
                     }

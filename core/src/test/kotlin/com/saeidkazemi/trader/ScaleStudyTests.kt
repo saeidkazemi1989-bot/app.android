@@ -71,6 +71,6 @@ class ScaleStudyTests {
         assertEquals((0.5 + 0.5 * (150.0 / 105.0 - 1)) / 1.5 * 100, ScaleStudy.simulate(s, p, AppSettings(), v).single().trade.netPct, 1e-6)
         // بدون سیگنال تازه، اضافه نمی‌شود
         assertEquals(50.0, net("A", px), 1e-6)
-        assertEquals(false, ScaleStudy.topUpDecision(null, null).first)
+        assertEquals(true, ScaleStudy.topUpDecision(null, null).first)
     }
 }

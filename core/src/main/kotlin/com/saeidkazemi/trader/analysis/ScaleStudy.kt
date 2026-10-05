@@ -170,17 +170,22 @@ object ScaleStudy {
     }
 
     /**
-     * افزودن به خرید قبلی فقط وقتی که آزمون روی داده واقعی نشان دهد بازده هر دلار را بدتر نمی‌کند — هم در کل و هم
-     * در داده‌های اخیر — و افت سرمایه خیلی بیشتر نشود (پول بیشتری روی یک دارایی می‌رود، پس ریسک بیشتر است). داده کم ⇒ نه.
+     * افزودن به خرید قبلی (درخواست مکرر کاربر): اجرا می‌شود، مگر آزمون روی داده واقعی نشان دهد روشن به ضرر است —
+     * هم در کل بیش از ۱۰٪ سود کمتر و هم در داده‌های اخیر بدتر — یا افت سرمایه خیلی بیشتر شود. داده کم ⇒ اجرا.
      */
     fun topUpDecision(ref: Row?, top: Row?): Pair<Boolean, String> {
-        if (ref == null || top == null || ref.all.trades < 30 || ref.oos.trades < 10) return false to "داده آزمون کافی نیست؛ فعلاً اضافه نمی‌کند"
+        if (ref == null || top == null || ref.all.trades < 30) return true to "داده آزمون کافی نیست؛ اضافه می‌کند"
         val tr = total(ref.all); val tt = total(top.all)
         val orr = total(ref.oos); val ot = total(top.oos)
         fun f(x: Double) = Math.round(x).toString()
         val nums = "جمع سود " + f(tt) + "٪ در برابر " + f(tr) + "٪ بدون آن؛ داده‌های اخیر " + f(ot) + "٪ در برابر " + f(orr) + "٪"
-        val ok = tt >= tr && ot >= orr && top.all.maxDrawdownPct <= ref.all.maxDrawdownPct * 1.25 + 1.0
-        return if (ok) true to ("اضافه می‌کند: " + nums) else false to ("اضافه نمی‌کند چون سود را بیشتر نمی‌کرد: " + nums)
+        val worse = tt < tr - maxOf(10.0, kotlin.math.abs(tr) * 0.10) && ot < orr
+        val riskier = top.all.maxDrawdownPct > ref.all.maxDrawdownPct * 1.5 + 2.0
+        return when {
+            worse -> false to ("اضافه نمی‌کند چون در آزمون سود را کم می‌کرد: " + nums)
+            riskier -> false to ("اضافه نمی‌کند چون افت سرمایه را خیلی بیشتر می‌کرد: " + nums)
+            else -> true to ("اضافه می‌کند: " + nums)
+        }
     }
 
     /**
