@@ -231,6 +231,12 @@ object ReviewReport {
             " • دقت سیگنال خرید هر بازار (بازده نسبی ۲۴س): " + com.saeidkazemi.trader.data.model.MarketKind.TRADED.joinToString("، ") {
                 it.faTitle + " " + f(c.tradeEngine.marketEdge(it), 2) + "٪"
             })
+        line("بی‌ضرر کردن بعد از سود: " + (if (settings.breakEvenAfterPct <= 0) "خاموش" else f(settings.breakEvenAfterPct, 0) + "٪" +
+            (if (settings.breakEvenSmart) " (فقط جایی که آزمون نشان ندهد سود را کم می‌کند)" else " (همه بازارها)")))
+        for (m in com.saeidkazemi.trader.data.model.MarketKind.TRADED) {
+            val w = bt?.guardWhy?.get(m.name) ?: continue
+            line("- بی‌ضرر کردن " + m.faTitle + ": " + w)
+        }
         line("انتخاب خودکار روش: " + (if (settings.autoScaleStyle) "روشن" else "خاموش (کلید دستی خرید پله‌ای: " + settings.scaledEntryMarkets.orEmpty().joinToString(",") + ")"))
         bt?.scaleChoice?.forEach { (k, v) ->
             val m = com.saeidkazemi.trader.data.model.MarketKind.values().firstOrNull { it.name == k }

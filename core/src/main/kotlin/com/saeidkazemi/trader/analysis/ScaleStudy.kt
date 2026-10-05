@@ -30,7 +30,9 @@ object ScaleStudy {
         /** رسیدن به حد سود: ۰ فروش، ۱ نفروش و آن نقطه را خرید جدید فرض کن (حد ضرر/سود از نو)، ۲ همان با حد ضرر نصف فاصله. */
         val roll: Int = 0,
         /** فاصله خرید دوباره همان دارایی بعد از خروج با حد ضرر (روز): ۰ همان لحظه، ۱ روز بعد (پیش‌فرض بک‌تست). */
-        val reGap: Int = 1
+        val reGap: Int = 1,
+        /** انتقال حد ضرر به سربه‌سر (با کارمزد) وقتی بیشترین سود به این درصد رسید (۰ = خاموش). */
+        val bePct: Double = 0.0
     )
 
     data class Row(
@@ -116,19 +118,51 @@ object ScaleStudy {
         val fromT = allT.minOrNull() ?: return emptyList()
         val toT = allT.maxOrNull() ?: return emptyList()
         val split = fromT + ((toT - fromT) * Backtest.IN_SAMPLE_FRACTION).toLong()
-        return VARIANTS.map { v ->
-            val res = series.flatMap { simulate(it, p, settings, v) }
-            val trades = res.map { it.trade }
-            Row(
-                market = m, id = v.id, title = v.title,
-                all = Backtest.stats(trades),
-                oos = Backtest.stats(trades.filter { it.entryT >= split }),
-                reached1R = res.count { it.peakR >= 1.0 },
-                giveback1R = res.count { it.peakR >= 1.0 && it.trade.netPct <= 0 },
-                reached8 = res.count { it.peakPct >= 8.0 },
-                giveback8 = res.count { it.peakPct >= 8.0 && it.trade.netPct <= 0 }
-            )
-        }
+        return VARIANTS.map { v -> row(m, series, p, settings, v, split) }
+    }
+
+    private fun row(m: MarketKind, series: List<Backtest.Series>, p: Backtest.Params, settings: AppSettings, v: Variant, split: Long): Row {
+        val res = series.flatMap { simulate(it, p, settings, v) }
+        val trades = res.map { it.trade }
+        return Row(
+            market = m, id = v.id, title = v.title,
+            all = Backtest.stats(trades),
+            oos = Backtest.stats(trades.filter { it.entryT >= split }),
+            reached1R = res.count { it.peakR >= 1.0 },
+            giveback1R = res.count { it.peakR >= 1.0 && it.trade.netPct <= 0 },
+            reached8 = res.count { it.peakPct >= 8.0 },
+            giveback8 = res.count { it.peakPct >= 8.0 && it.trade.netPct <= 0 }
+        )
+    }
+
+    // ---- «بی‌ضرر کردن بعد از X٪ سود» روی روش انتخاب‌شده هر بازار ----
+
+    /** همان روش انتخاب‌شده، به‌علاوه انتقال حد ضرر به نقطه بی‌ضرر بعد از [pct]٪ سود (ردیف P گزارش). */
+    fun guardRow(m: MarketKind, series: List<Backtest.Series>, p: Backtest.Params, settings: AppSettings, chosen: String, pct: Double): Row? {
+        if (series.isEmpty() || pct <= 0) return null
+        val base = VARIANTS.firstOrNull { it.id == chosen } ?: VARIANTS.first()
+        val allT = series.flatMap { listOf(it.t.first(), it.t.last()) }
+        val fromT = allT.minOrNull() ?: return null
+        val toT = allT.maxOrNull() ?: return null
+        val split = fromT + ((toT - fromT) * Backtest.IN_SAMPLE_FRACTION).toLong()
+        val v = base.copy(id = "P", title = "روش انتخاب‌شده (" + base.id + ") + بی‌ضرر کردن بعد از " + Math.round(pct) + "٪ سود", bePct = pct)
+        return row(m, series, p, settings, v, split)
+    }
+
+    /**
+     * «بی‌ضرر کردن» در این بازار اجرا شود؟ بله، مگر آزمون روی داده واقعی نشان دهد هم در کل بیش از ۱۰٪ از سود را
+     * کم می‌کند و هم در داده‌های اخیر بهتر نیست. داده کم ⇒ اجرا (درخواست کاربر).
+     */
+    fun guardDecision(rows: List<Row>, chosen: String, guard: Row?): Pair<Boolean, String> {
+        val c = rows.firstOrNull { it.id == chosen } ?: rows.firstOrNull { it.id == "A" }
+        if (guard == null || c == null || c.all.trades < 30) return true to "داده آزمون کافی نیست؛ اجرا می‌شود"
+        val tc = total(c.all); val tg = total(guard.all)
+        val oc = total(c.oos); val og = total(guard.oos)
+        fun f(x: Double) = Math.round(x).toString()
+        val nums = "جمع سود " + f(tg) + "٪ در برابر " + f(tc) + "٪ بدون آن؛ داده‌های اخیر " + f(og) + "٪ در برابر " + f(oc) + "٪"
+        val tooCostly = tg < tc - maxOf(10.0, kotlin.math.abs(tc) * 0.10) && og < oc
+        return if (tooCostly) false to ("اجرا نمی‌شود چون سود را کم می‌کرد: " + nums)
+        else true to ("اجرا می‌شود: " + nums)
     }
 
     class Sim(val trade: Backtest.Trade, val peakR: Double, val peakPct: Double)
@@ -192,6 +226,7 @@ object ScaleStudy {
                     RiskManager.ProfitLock.stopFor(e0, peak, bf + hs, sf + hs, lockTrig, lockKeep)?.let { stop = maxOf(stop, it) }
                 }
                 if (v.beR > 0 && peak >= e0 * (1 + v.beR * r)) stop = maxOf(stop, breakEven() * 1.001)
+                if (v.bePct > 0 && peak >= e0 * (1 + v.bePct / 100)) stop = maxOf(stop, breakEven() * 1.001)
                 // فروش پله‌ای (قبل از بررسی حد سود کامل)
                 while (partialIdx < v.partials.size && px >= e0 * (1 + v.partials[partialIdx].first * r) && px < tp) {
                     sell(v.partials[partialIdx].second, px)

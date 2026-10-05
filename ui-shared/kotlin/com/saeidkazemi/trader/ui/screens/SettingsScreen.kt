@@ -354,6 +354,42 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
             }
         }
 
+        // بی‌ضرر کردن بعد از ۳٪ سود
+        item {
+            SettingsCard("بی‌ضرر کردن بعد از ۳٪ سود") {
+                Text(
+                    "وقتی یک خرید ۳٪ سود گرفت، حد ضرر روی قیمت خرید به‌علاوه کارمزد می‌رود تا آن معامله دیگر با زیان بسته نشود " +
+                        "(مثلاً خریدی که ۱۰٪ سود داشت و بعد با زیان فروخته شد). اگر کلید دوم روشن باشد، در بازاری که آزمون روزانه " +
+                        "روی داده واقعی نشان دهد این کار سود را روشن کم می‌کند، اجرا نمی‌شود.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                SwitchRow("بی‌ضرر کردن بعد از ۳٪ سود", state.settings.breakEvenAfterPct > 0) { vm.toggleBreakEven(it) }
+                if (state.settings.breakEvenAfterPct > 0) {
+                    SwitchRow("فقط جایی که آزمون نشان دهد سود را کم نمی‌کند", state.settings.breakEvenSmart) { vm.toggleBreakEvenSmart(it) }
+                    if (state.settings.breakEvenSmart) {
+                        val bt = state.backtest
+                        for (m in listOf(
+                            com.saeidkazemi.trader.data.model.MarketKind.CRYPTO,
+                            com.saeidkazemi.trader.data.model.MarketKind.IR_STOCK,
+                            com.saeidkazemi.trader.data.model.MarketKind.METAL
+                        )) {
+                            val on = bt?.guardOn?.get(m.name) != false
+                            Text(
+                                m.faTitle + ": " + (if (on) "اجرا می‌شود" else "اجرا نمی‌شود"),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                            val why = bt?.guardWhy?.get(m.name) ?: "در انتظار آزمون بعدی (فعلاً اجرا می‌شود)"
+                            Text(why, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // قفل سود
         item {
             SettingsCard("قفل سود (حفظ سود به‌دست‌آمده)") {

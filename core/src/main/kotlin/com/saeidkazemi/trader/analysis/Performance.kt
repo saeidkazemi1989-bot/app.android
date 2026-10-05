@@ -126,6 +126,7 @@ object Performance {
     fun exitCategory(reason: String?): String {
         val r = reason ?: return "نامشخص"
         return when {
+            r.contains("بی‌ضرر") -> "بی‌ضرر"
             r.contains("حفظ سود") || r.contains("قفل سود حداقل") -> "قفل سود"
             r.contains("متحرک") -> "حد ضرر متحرک"
             r.contains("حد ضرر") -> "حد ضرر"

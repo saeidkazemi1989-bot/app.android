@@ -231,7 +231,14 @@ data class AppSettings(
     /** سرمایه مشترک: نقد آزاد هر بازار برای خرید در بازارهای دیگر هم استفاده می‌شود (با سقف سهم هر بازار). */
     val sharedCapital: Boolean = true,
     /** سقف سهم یک بازار از کل سرمایه (٪) در حالت سرمایه مشترک. */
-    val maxMarketSharePct: Double = 60.0
+    val maxMarketSharePct: Double = 60.0,
+    /**
+     * بی‌ضرر کردن: وقتی بیشترین سود یک خرید به این درصد رسید، حد ضرر روی قیمت خرید + کارمزد می‌رود
+     * تا آن معامله دیگر با زیان بسته نشود (۰ = خاموش). درخواست کاربر بعد از گزارش HDD8-QZCW.
+     */
+    val breakEvenAfterPct: Double = 3.0,
+    /** فقط در بازارهایی که آزمون روزانه نشان ندهد سود را روشن کم می‌کند. */
+    val breakEvenSmart: Boolean = true
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

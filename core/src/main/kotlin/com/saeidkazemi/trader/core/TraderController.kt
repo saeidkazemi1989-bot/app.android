@@ -515,6 +515,17 @@ class TraderController(
             else "سرمایه مشترک خاموش شد؛ هر بازار فقط با نقد خودش خرید می‌کند.")
     }
 
+    /** بی‌ضرر کردن بعد از ۳٪ سود. */
+    fun toggleBreakEven(on: Boolean) {
+        updateSettings { it.copy(breakEvenAfterPct = if (on) 3.0 else 0.0) }
+        toast(if (on) "بی‌ضرر کردن روشن شد: بعد از ۳٪ سود، حد ضرر روی قیمت خرید + کارمزد می‌رود." else "بی‌ضرر کردن خاموش شد.")
+    }
+
+    fun toggleBreakEvenSmart(on: Boolean) {
+        updateSettings { it.copy(breakEvenSmart = on) }
+        toast(if (on) "بی‌ضرر کردن فقط در بازارهایی اجرا می‌شود که آزمون روزانه نشان ندهد سود را کم می‌کند." else "بی‌ضرر کردن در همه بازارها اجرا می‌شود.")
+    }
+
     /** انتخاب خودکار روش ورود/خروج هر بازار از آزمون روزانه. */
     fun toggleAutoScaleStyle(on: Boolean) {
         updateSettings { it.copy(autoScaleStyle = on) }

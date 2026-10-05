@@ -45,4 +45,15 @@ class ScaleStudyTests {
         // دوباره به حد سود جدید (۲۲۵) رسید: حد ضرر ۲۰۷؛ خروج در ۲۰۰
         assertEquals(100.0, net("K", doubleArrayOf(100.0, 150.0, 230.0, 200.0)), 1e-6)
     }
+
+    @Test
+    fun breakEvenAfter3Pct() {
+        // مثل LINK: +۱۰٫۶٪ سود، بعد برگشت زیر حد ضرر. با بی‌ضرر کردن بعد از ۳٪، خروج در ۹۸ بسته روزانه زیر ۱۰۰٫۱
+        val px = doubleArrayOf(100.0, 103.5, 110.6, 104.0, 98.0, 89.0)
+        assertEquals(-11.0, net("A", px), 1e-6)
+        val v = ScaleStudy.VARIANTS.first { it.id == "A" }.copy(bePct = 3.0)
+        assertEquals(-2.0, ScaleStudy.simulate(series(px), p, AppSettings(), v).single().trade.netPct, 1e-6)
+        // تصمیم: داده کم ⇒ اجرا
+        assertEquals(true, ScaleStudy.guardDecision(emptyList(), "A", null).first)
+    }
 }

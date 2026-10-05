@@ -105,6 +105,13 @@ class TradeEngine(
     }
 
     /** روش ورود/خروج فعال یک بازار (کد ScaleStudy): خودکار از آزمون روزانه، یا کلید دستی خرید پله‌ای. */
+    /** درصد سودی که بعد از آن حد ضرر به نقطه بی‌ضرر می‌رود در این بازار (۰ = خاموش). */
+    fun breakEvenPctFor(settings: AppSettings, m: MarketKind): Double {
+        if (settings.breakEvenAfterPct <= 0) return 0.0
+        if (!settings.breakEvenSmart) return settings.breakEvenAfterPct
+        return if (backtest?.guardOn?.get(m.name) == false) 0.0 else settings.breakEvenAfterPct
+    }
+
     fun styleFor(settings: AppSettings, m: MarketKind): String =
         if (settings.autoScaleStyle) backtest?.scaleChoice?.get(m.name) ?: "A"
         else if (settings.scaledEntry(m)) "I" else "A"
@@ -153,6 +160,8 @@ class TradeEngine(
             val results = ArrayList<Backtest.MarketResult>()
             val notes = ArrayList<String>()
             val scale = ArrayList<com.saeidkazemi.trader.analysis.ScaleStudy.Row>()
+            val guardOn = HashMap<String, Boolean>()
+            val guardWhy = HashMap<String, String>()
             val sem = Semaphore(4)
             for (m in listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.METAL)) {
                 val pool = assets.filter { it.market == m && !it.isDisplayOnly && !it.isSimulated }
@@ -186,19 +195,34 @@ class TradeEngine(
                 Backtest.optimize(m, series, current, settings)?.let { res ->
                     results.add(res)
                     val studied = res.best?.takeIf { res.applied } ?: res.current
-                    try { scale.addAll(com.saeidkazemi.trader.analysis.ScaleStudy.run(m, series, studied, settings)) } catch (_: Exception) { }
+                    try {
+                        val rows = com.saeidkazemi.trader.analysis.ScaleStudy.run(m, series, studied, settings)
+                        scale.addAll(rows)
+                        // بی‌ضرر کردن بعد از X٪ سود روی همان روشی که امروز برای این بازار انتخاب می‌شود
+                        if (settings.breakEvenAfterPct > 0 && rows.isNotEmpty()) {
+                            val chosen = if (settings.autoScaleStyle) com.saeidkazemi.trader.analysis.ScaleStudy.choose(rows).first
+                                else if (settings.scaledEntry(m)) "I" else "A"
+                            val g = com.saeidkazemi.trader.analysis.ScaleStudy.guardRow(m, series, studied, settings, chosen, settings.breakEvenAfterPct)
+                            if (g != null) scale.add(g)
+                            val (on, gWhy) = com.saeidkazemi.trader.analysis.ScaleStudy.guardDecision(rows, chosen, g)
+                            guardOn[m.name] = on
+                            guardWhy[m.name] = gWhy
+                        }
+                    } catch (_: Exception) { }
                 }
             }
             if (results.isEmpty() && backtest != null) return backtest
             // انتخاب روش ورود/خروج هر بازار؛ بازاری که امروز آزمون نشد، انتخاب قبلی‌اش را نگه می‌دارد
             val choice = HashMap<String, String>(backtest?.scaleChoice.orEmpty())
+            for ((k, v) in backtest?.guardOn.orEmpty()) guardOn.putIfAbsent(k, v)
+            for ((k, v) in backtest?.guardWhy.orEmpty()) guardWhy.putIfAbsent(k, v)
             val why = HashMap<String, String>(backtest?.scaleWhy.orEmpty())
             for ((m, rows) in scale.groupBy { it.market }) {
                 val (id, reason) = com.saeidkazemi.trader.analysis.ScaleStudy.choose(rows)
                 choice[m.name] = id
                 why[m.name] = reason
             }
-            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale, choice, why)
+            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale, choice, why, guardOn, guardWhy)
             backtest = report
             store.saveBacktest(report)
             if (results.any { it.applied }) {
@@ -1179,7 +1203,8 @@ class TradeEngine(
                 val style = styleFor(settings, pos.market)
                 val beR = com.saeidkazemi.trader.analysis.ScaleStudy.breakEvenR(style)
                 val rollR = com.saeidkazemi.trader.analysis.ScaleStudy.rollR(style)
-                if (beR <= 0 && rollR <= 0) continue
+                val bePct = breakEvenPctFor(settings, pos.market)
+                if (beR <= 0 && rollR <= 0 && bePct <= 0) continue
                 val cur = priceMap[pos.assetId] ?: continue
                 if (!cur.isFinite() || cur <= 0) continue
                 val plan = planFor(settings, pos.market)
@@ -1187,9 +1212,9 @@ class TradeEngine(
                     ?: (1 - pos.stopLossUsd / pos.avgBuyUsd).takeIf { pos.stopLossUsd < pos.avgBuyUsd && it > 0.005 }
                     ?: plan.stopFor(null)
                 val a = assetMap[pos.assetId]
-                if (beR > 0) {
+                if (beR > 0 || bePct > 0) {
                     val peak = maxOf(pos.peakUsd, cur)
-                    if (peak >= pos.avgBuyUsd * (1 + beR * r)) {
+                    if ((beR > 0 && peak >= pos.avgBuyUsd * (1 + beR * r)) || (bePct > 0 && peak >= pos.avgBuyUsd * (1 + bePct / 100))) {
                         val sf = feeFor(a, pos.market, false, settings) + halfSpread(a, pos.market)
                         val be = pos.cost() / pos.qty / (1 - sf) * 1.001
                         if (be < cur && broker.raiseStop(pos.assetId, be)) {
@@ -1220,6 +1245,9 @@ class TradeEngine(
             val reason: String? = when {
                 curUsd <= pos.stopLossUsd && pos.profitLockedPct > 0 ->
                     "حفظ سود (قفل سود حداقل " + Format.num(pos.profitLockedPct, 0) + "٪)"
+                curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd &&
+                    !(pos.trailPct > 0 && pos.stopLossUsd >= pos.peakUsd * (1 - pos.trailPct) * 0.999) &&
+                    pos.stopLossUsd <= pos.avgBuyUsd * 1.03 -> "حد ضرر بی‌ضرر (فروش بدون زیان بعد از سود)"
                 curUsd <= pos.stopLossUsd && pos.stopLossUsd > pos.avgBuyUsd -> "حد ضرر متحرک (حفظ سود)"
                 // حد ضرری که با قله تازه بالا کشیده شده ولی هنوز زیر قیمت خرید است
                 curUsd <= pos.stopLossUsd && pos.trailPct > 0 && pos.peakUsd > pos.avgBuyUsd &&

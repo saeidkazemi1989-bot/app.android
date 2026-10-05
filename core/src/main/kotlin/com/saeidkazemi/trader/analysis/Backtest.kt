@@ -166,7 +166,10 @@ object Backtest {
         val scale: List<ScaleStudy.Row>? = null,
         /** روش ورود/خروج انتخاب‌شده برای هر بازار (کد حالت ScaleStudy) و دلیلش. */
         val scaleChoice: Map<String, String>? = null,
-        val scaleWhy: Map<String, String>? = null
+        val scaleWhy: Map<String, String>? = null,
+        /** «بی‌ضرر کردن بعد از X٪ سود» در هر بازار اجرا می‌شود؟ و دلیلش (از آزمون روزانه). */
+        val guardOn: Map<String, Boolean>? = null,
+        val guardWhy: Map<String, String>? = null
     ) {
         fun appliedFor(m: MarketKind): Params? = results.firstOrNull { it.market == m && it.applied }?.best
     }
