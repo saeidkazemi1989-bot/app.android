@@ -56,4 +56,21 @@ class ScaleStudyTests {
         // تصمیم: داده کم ⇒ اجرا
         assertEquals(true, ScaleStudy.guardDecision(emptyList(), "A", null).first)
     }
+
+    @Test
+    fun topUpOnFreshSignal() {
+        // خرید در ۱۰۰؛ روز دوم ۱۰۵ (+۵٪) با سیگنال تازه ⇒ نصف مبلغ اضافه می‌شود؛ خروج در حد سود ۱۵۰
+        val px = doubleArrayOf(100.0, 105.0, 150.0)
+        val n = px.size
+        val s = Backtest.Series(
+            "x", "X", LongArray(n) { 1_700_000_000_000L + it * 86_400_000L }, px,
+            IntArray(n) { if (it <= 1) 100 else -1 }, DoubleArray(n) { Double.NaN }, Backtest.Costs(0.0, 0.0, 0.0)
+        )
+        val v = ScaleStudy.VARIANTS.first { it.id == "A" }.copy(topUp = true)
+        // ۱ دلار در ۱۰۰ (+۵۰٪) + ۰٫۵ دلار در ۱۰۵ (+۴۲٫۸۶٪) ⇒ بازده هر دلار (0.5 + 0.2143) / 1.5
+        assertEquals((0.5 + 0.5 * (150.0 / 105.0 - 1)) / 1.5 * 100, ScaleStudy.simulate(s, p, AppSettings(), v).single().trade.netPct, 1e-6)
+        // بدون سیگنال تازه، اضافه نمی‌شود
+        assertEquals(50.0, net("A", px), 1e-6)
+        assertEquals(false, ScaleStudy.topUpDecision(null, null).first)
+    }
 }

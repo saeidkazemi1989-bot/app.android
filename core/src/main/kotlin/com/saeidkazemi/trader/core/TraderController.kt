@@ -515,6 +515,17 @@ class TraderController(
             else "سرمایه مشترک خاموش شد؛ هر بازار فقط با نقد خودش خرید می‌کند.")
     }
 
+    /** افزودن به خرید قبلی وقتی در سود است و سیگنال تازه می‌دهد. */
+    fun toggleTopUp(on: Boolean) {
+        updateSettings { it.copy(topUpWinners = on) }
+        toast(if (on) "افزودن به خرید قبلی روشن شد." else "افزودن به خرید قبلی خاموش شد؛ هر دارایی فقط یک بار خریده می‌شود.")
+    }
+
+    fun toggleTopUpSmart(on: Boolean) {
+        updateSettings { it.copy(topUpSmart = on) }
+        toast(if (on) "افزودن فقط در بازارهایی که آزمون روزانه نشان دهد سود را بیشتر می‌کند." else "افزودن در همه بازارها (بدون شرط آزمون).")
+    }
+
     /** بی‌ضرر کردن بعد از ۳٪ سود. */
     fun toggleBreakEven(on: Boolean) {
         updateSettings { it.copy(breakEvenAfterPct = if (on) 3.0 else 0.0) }

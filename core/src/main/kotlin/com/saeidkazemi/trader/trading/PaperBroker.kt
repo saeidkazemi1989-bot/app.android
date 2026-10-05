@@ -411,7 +411,7 @@ class PaperBroker(private val store: JsonStore) : Broker {
      * پله دوم خرید پله‌ای: به موقعیت موجود اضافه می‌کند (میانگین قیمت و بهای تمام‌شده به‌روز می‌شود؛
      * حد ضرر و حد سود همان قبلی می‌ماند) و پله در انتظار پاک می‌شود.
      */
-    fun addToPosition(assetId: String, usdPrice: Double, usdAmount: Double, feePct: Double, reason: String): Trade? = synchronized(lock) {
+    fun addToPosition(assetId: String, usdPrice: Double, usdAmount: Double, feePct: Double, reason: String, topUp: Boolean = false): Trade? = synchronized(lock) {
         val a = ensure()
         val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized null
         if (!usdPrice.isFinite() || usdPrice <= 0 || !usdAmount.isFinite() || usdAmount <= 0) return@synchronized null
@@ -431,7 +431,8 @@ class PaperBroker(private val store: JsonStore) : Broker {
             addPendingUsd = 0.0,
             addTriggerUsd = 0.0,
             addDeadline = 0L,
-            addedAt = now
+            addedAt = now,
+            topUps = pos.topUps + (if (topUp) 1 else 0)
         )
         val trade = Trade(
             id = shortId(), ts = now, assetId = assetId, symbol = pos.symbol, side = "BUY",

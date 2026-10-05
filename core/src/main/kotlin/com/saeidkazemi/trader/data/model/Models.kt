@@ -137,7 +137,9 @@ data class Position(
     /** اولین لحظه‌ای که قیمت زیر حد ضرر دیده شد ولی فروش انجام نشد (مثلاً بازار بسته بود)؛ ۰ = نه. */
     val stopHitAt: Long = 0L,
     /** وقتی قیمت زیر حد ضرر رفت، بازار باز بود؟ (برای توضیح دقیق در گزارش) */
-    val stopHitOpen: Boolean = false
+    val stopHitOpen: Boolean = false,
+    /** چند بار به این خرید (بعد از سود و سیگنال تازه) اضافه شد. */
+    val topUps: Int = 0
 ) {
     /** بهای تمام‌شده برای محاسبه سود/زیان واقعی (با کارمزد خرید). */
     fun cost(): Double = if (costUsd > 0) costUsd else qty * avgBuyUsd
@@ -238,7 +240,14 @@ data class AppSettings(
      */
     val breakEvenAfterPct: Double = 3.0,
     /** فقط در بازارهایی که آزمون روزانه نشان ندهد سود را روشن کم می‌کند. */
-    val breakEvenSmart: Boolean = true
+    val breakEvenSmart: Boolean = true,
+    /**
+     * افزودن به خرید قبلی: اگر دارایی‌ای که داریم حداقل ۳٪ در سود است و دوباره سیگنال خرید داد و نقد آزاد هست،
+     * نصف مبلغ خرید اول به آن اضافه می‌شود (یک بار برای هر خرید). درخواست کاربر (بازار طلا).
+     */
+    val topUpWinners: Boolean = true,
+    /** فقط در بازارهایی که آزمون روزانه نشان دهد سود را بیشتر می‌کند. */
+    val topUpSmart: Boolean = true
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

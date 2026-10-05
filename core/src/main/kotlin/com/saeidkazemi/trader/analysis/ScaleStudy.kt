@@ -32,7 +32,10 @@ object ScaleStudy {
         /** فاصله خرید دوباره همان دارایی بعد از خروج با حد ضرر (روز): ۰ همان لحظه، ۱ روز بعد (پیش‌فرض بک‌تست). */
         val reGap: Int = 1,
         /** انتقال حد ضرر به سربه‌سر (با کارمزد) وقتی بیشترین سود به این درصد رسید (۰ = خاموش). */
-        val bePct: Double = 0.0
+        val bePct: Double = 0.0,
+        /** افزودن به خرید قبلی: اگر خرید حداقل [topUpPct]٪ در سود بود و سیگنال خرید دوباره آمد، نصف مبلغ اول اضافه می‌شود (یک بار). */
+        val topUp: Boolean = false,
+        val topUpPct: Double = 3.0
     )
 
     data class Row(
@@ -149,6 +152,37 @@ object ScaleStudy {
         return row(m, series, p, settings, v, split)
     }
 
+    /** روش انتخاب‌شده (و بی‌ضرر کردن اگر در این بازار اجرا می‌شود) + افزودن به خرید سودده (ردیف T گزارش). */
+    fun topUpRow(m: MarketKind, series: List<Backtest.Series>, p: Backtest.Params, settings: AppSettings, chosen: String, bePct: Double, topPct: Double): Row? {
+        if (series.isEmpty()) return null
+        val base = VARIANTS.firstOrNull { it.id == chosen } ?: VARIANTS.first()
+        val allT = series.flatMap { listOf(it.t.first(), it.t.last()) }
+        val fromT = allT.minOrNull() ?: return null
+        val toT = allT.maxOrNull() ?: return null
+        val split = fromT + ((toT - fromT) * Backtest.IN_SAMPLE_FRACTION).toLong()
+        val v = base.copy(
+            id = "T",
+            title = "روش انتخاب‌شده (" + base.id + ")" + (if (bePct > 0) " + بی‌ضرر کردن" else "") +
+                " + افزودن نصف مبلغ به خرید " + Math.round(topPct) + "٪ سودده با سیگنال تازه (بازده هر دلار)",
+            bePct = bePct, topUp = true, topUpPct = topPct
+        )
+        return row(m, series, p, settings, v, split)
+    }
+
+    /**
+     * افزودن به خرید قبلی فقط وقتی که آزمون روی داده واقعی نشان دهد بازده هر دلار را بدتر نمی‌کند — هم در کل و هم
+     * در داده‌های اخیر — و افت سرمایه خیلی بیشتر نشود (پول بیشتری روی یک دارایی می‌رود، پس ریسک بیشتر است). داده کم ⇒ نه.
+     */
+    fun topUpDecision(ref: Row?, top: Row?): Pair<Boolean, String> {
+        if (ref == null || top == null || ref.all.trades < 30 || ref.oos.trades < 10) return false to "داده آزمون کافی نیست؛ فعلاً اضافه نمی‌کند"
+        val tr = total(ref.all); val tt = total(top.all)
+        val orr = total(ref.oos); val ot = total(top.oos)
+        fun f(x: Double) = Math.round(x).toString()
+        val nums = "جمع سود " + f(tt) + "٪ در برابر " + f(tr) + "٪ بدون آن؛ داده‌های اخیر " + f(ot) + "٪ در برابر " + f(orr) + "٪"
+        val ok = tt >= tr && ot >= orr && top.all.maxDrawdownPct <= ref.all.maxDrawdownPct * 1.25 + 1.0
+        return if (ok) true to ("اضافه می‌کند: " + nums) else false to ("اضافه نمی‌کند چون سود را بیشتر نمی‌کرد: " + nums)
+    }
+
     /**
      * «بی‌ضرر کردن» در این بازار اجرا شود؟ بله، مگر آزمون روی داده واقعی نشان دهد هم در کل بیش از ۱۰٪ از سود را
      * کم می‌کند و هم در داده‌های اخیر بهتر نیست. داده کم ⇒ اجرا (درخواست کاربر).
@@ -209,6 +243,7 @@ object ScaleStudy {
             fun breakEven(): Double = if (bought > 0) spent / bought / ((1 - hs) * (1 - sf)) else 0.0
             buy(if (v.entry == 0) 1.0 else 0.5, e0)
             var addDone = v.entry == 0
+            var toppedUp = false
             var partialIdx = 0
             var exitIdx = -1
             var reason = ""
@@ -220,6 +255,11 @@ object ScaleStudy {
                 if (!addDone && (j - i) <= v.entryDays) {
                     if (v.entry == 1 && px <= e0 * (1 - v.entryR * r) && px > stop) { buy(0.5, px); addDone = true }
                     else if (v.entry == 2 && px >= e0 * (1 + v.entryR * r)) { buy(0.5, px); addDone = true }
+                }
+                // افزودن به خرید سودده با سیگنال تازه
+                if (v.topUp && !toppedUp && px >= e0 * (1 + v.topUpPct / 100) && px > stop && px < tp) {
+                    val again = if (p.mode == 1) s.score[j] >= 0 && s.rsi[j].isFinite() && s.rsi[j] < p.rsiMax else s.score[j] >= p.threshold
+                    if (again) { buy(0.5, px); toppedUp = true }
                 }
                 if (p.trailPct > 0) stop = maxOf(stop, peak * (1 - p.trailPct))
                 if (lockTrig > 0) {
@@ -250,7 +290,8 @@ object ScaleStudy {
             }
             if (exitIdx < 0) break
             sell(1.0, s.close[exitIdx])
-            val net = (proceeds - spent) * 100 // بر حسب کل سهم سرمایه این معامله
+            // بر حسب کل سهم سرمایه این معامله؛ در «افزودن» بر حسب هر دلار خرج‌شده (پول اضافه از نقد بیکار می‌آید)
+            val net = if (v.topUp && spent > 0) (proceeds - spent) / spent * 100 else (proceeds - spent) * 100
             out.add(
                 Sim(
                     Backtest.Trade(

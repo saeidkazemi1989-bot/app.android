@@ -64,6 +64,8 @@ class TradeEngine(
         const val LEFTOVER_MIN_USD = 4.0
         /** خرید پله‌ای با تأیید: مهلت پله دوم (روز) و رشد لازم (کسری از فاصله حد ضرر) — همان آزمون «I». */
         const val SCALE_DAYS = 5
+        /** افزودن به خرید قبلی فقط وقتی آن خرید حداقل این‌قدر (٪) در سود است. */
+        const val TOPUP_MIN_GAIN_PCT = 3.0
         const val SCALE_TRIGGER_R = 0.5
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
@@ -110,6 +112,13 @@ class TradeEngine(
         if (settings.breakEvenAfterPct <= 0) return 0.0
         if (!settings.breakEvenSmart) return settings.breakEvenAfterPct
         return if (backtest?.guardOn?.get(m.name) == false) 0.0 else settings.breakEvenAfterPct
+    }
+
+    /** افزودن به خرید قبلی در این بازار مجاز است؟ (حالت هوشمند: فقط اگر آزمون روزانه تأیید کرده باشد) */
+    fun topUpFor(settings: AppSettings, m: MarketKind): Boolean {
+        if (!settings.topUpWinners) return false
+        if (!settings.topUpSmart) return true
+        return backtest?.topUpOn?.get(m.name) == true
     }
 
     fun styleFor(settings: AppSettings, m: MarketKind): String =
@@ -162,6 +171,8 @@ class TradeEngine(
             val scale = ArrayList<com.saeidkazemi.trader.analysis.ScaleStudy.Row>()
             val guardOn = HashMap<String, Boolean>()
             val guardWhy = HashMap<String, String>()
+            val topUpOn = HashMap<String, Boolean>()
+            val topUpWhy = HashMap<String, String>()
             val sem = Semaphore(4)
             for (m in listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK, MarketKind.METAL)) {
                 val pool = assets.filter { it.market == m && !it.isDisplayOnly && !it.isSimulated }
@@ -208,6 +219,20 @@ class TradeEngine(
                             guardOn[m.name] = on
                             guardWhy[m.name] = gWhy
                         }
+                        // افزودن به خرید سودده: مقایسه با همان چیزی که الان اجرا می‌شود (روش + بی‌ضرر کردن در صورت اجرا)
+                        if (settings.topUpWinners && rows.isNotEmpty()) {
+                            val chosen = if (settings.autoScaleStyle) com.saeidkazemi.trader.analysis.ScaleStudy.choose(rows).first
+                                else if (settings.scaledEntry(m)) "I" else "A"
+                            val beOn = settings.breakEvenAfterPct > 0 && (!settings.breakEvenSmart || guardOn[m.name] != false)
+                            val ref = if (beOn) scale.lastOrNull { it.market == m && it.id == "P" } else rows.firstOrNull { it.id == chosen }
+                            val t = com.saeidkazemi.trader.analysis.ScaleStudy.topUpRow(
+                                m, series, studied, settings, chosen, if (beOn) settings.breakEvenAfterPct else 0.0, TOPUP_MIN_GAIN_PCT
+                            )
+                            if (t != null) scale.add(t)
+                            val (on, tWhy) = com.saeidkazemi.trader.analysis.ScaleStudy.topUpDecision(ref, t)
+                            topUpOn[m.name] = on
+                            topUpWhy[m.name] = tWhy
+                        }
                     } catch (_: Exception) { }
                 }
             }
@@ -216,13 +241,15 @@ class TradeEngine(
             val choice = HashMap<String, String>(backtest?.scaleChoice.orEmpty())
             for ((k, v) in backtest?.guardOn.orEmpty()) guardOn.putIfAbsent(k, v)
             for ((k, v) in backtest?.guardWhy.orEmpty()) guardWhy.putIfAbsent(k, v)
+            for ((k, v) in backtest?.topUpOn.orEmpty()) topUpOn.putIfAbsent(k, v)
+            for ((k, v) in backtest?.topUpWhy.orEmpty()) topUpWhy.putIfAbsent(k, v)
             val why = HashMap<String, String>(backtest?.scaleWhy.orEmpty())
             for ((m, rows) in scale.groupBy { it.market }) {
                 val (id, reason) = com.saeidkazemi.trader.analysis.ScaleStudy.choose(rows)
                 choice[m.name] = id
                 why[m.name] = reason
             }
-            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale, choice, why, guardOn, guardWhy)
+            val report = Backtest.Report(System.currentTimeMillis(), results, notes, scale, choice, why, guardOn, guardWhy, topUpOn, topUpWhy)
             backtest = report
             store.saveBacktest(report)
             if (results.any { it.applied }) {
@@ -538,6 +565,87 @@ class TradeEngine(
     }
 
     /** دلیل ممنوعیت معامله سهام در این لحظه (بسته بودن بازار یا صف)، یا null اگر مجاز است. */
+    /**
+     * افزودن به خرید قبلی (درخواست کاربر): دارایی‌ای که داریم دوباره سیگنال خرید داده. اگر این بازار مجاز است،
+     * خرید حداقل ۳٪ در سود است و نقد آزاد هست، نصف مبلغ خرید اول (حداکثر تا سهم یک‌ونیم موقعیت) اضافه می‌شود.
+     * یک بار برای هر خرید. خروجی null یعنی اضافه شد؛ در غیر این صورت دلیل انجام نشدن (برای پنل فعالیت).
+     */
+    private suspend fun tryTopUp(
+        pos: com.saeidkazemi.trader.data.model.Position,
+        sig: Signal,
+        m: MarketKind,
+        plan: RiskManager.Plan,
+        settings: AppSettings,
+        equity: Double,
+        reserve: Double,
+        guardActive: Boolean,
+        assetMap: Map<String, Asset>,
+        priceMap: Map<String, Double>,
+        sells: List<String>,
+        usdIrr: Double,
+        notes: MutableList<String>,
+        buys: MutableList<String>
+    ): String? {
+        val held = "از قبل در پرتفوی است"
+        if (!topUpFor(settings, m)) return held
+        if (sig.newsBlocked || sig.proBlocked) return held
+        if (guardActive) return "$held (محافظ نرخ برد فعال است؛ به خرید قبلی اضافه نمی‌شود)"
+        if (pos.topUps > 0) return "$held و یک بار به آن اضافه شده"
+        if (pos.addPendingUsd > 0) return "$held (پله دوم خرید پله‌ای در انتظار است)"
+        if (sells.contains(pos.symbol)) return held
+        val asset = assetMap[pos.assetId] ?: return held
+        if (asset.isSimulated) return held
+        irBlock(asset, buy = true)?.let { return if (it.startsWith("نماد")) "در صف خرید است" else it }
+        if (asset.sellQueue) return "در صف فروش است"
+        val cur = priceMap[asset.id] ?: return held
+        if (!cur.isFinite() || cur <= 0 || pos.avgBuyUsd <= 0) return held
+        val gain = (cur / pos.avgBuyUsd - 1) * 100
+        if (gain < TOPUP_MIN_GAIN_PCT) return held + "؛ افزودن فقط وقتی حداقل " + Format.trim(TOPUP_MIN_GAIN_PCT, 0) + "٪ در سود باشد (الان " + Format.pct(gain) + ")"
+        if (cur >= pos.takeProfitUsd * 0.98 || cur <= pos.stopLossUsd * 1.01) return held
+        val acc = broker.account()
+        // حداکثر: نصف مبلغ خرید اول و اینکه کل این دارایی از یک‌ونیم برابر سهم یک موقعیت بیشتر نشود
+        val cap = equity * plan.positionPct * 1.5 - pos.qty * cur
+        val want = minOf(pos.cost() * 0.5, cap)
+        if (want < LEFTOVER_MIN_USD) return "$held و به سقف سهم یک دارایی رسیده"
+        val pendingHere = acc.positions.filter { it.market == m }.sumOf { it.addPendingUsd }
+        var available = (acc.cashByMarket[m.name] ?: 0.0) - reserve - pendingHere
+        if (settings.sharedCapital && available < want) {
+            val (got, from) = borrowCash(m, want - maxOf(0.0, available), settings, priceMap)
+            if (got > 0) {
+                available += got
+                notes.add("سرمایه مشترک: " + from.joinToString("، ") + " از نقد آزاد برای افزودن به " + asset.symbol + " استفاده شد.")
+            }
+        }
+        val amt = minOf(want, available)
+        if (amt < LEFTOVER_MIN_USD) return "$held و نقد آزاد برای افزودن کافی نیست"
+        val reason = "افزودن به خرید قبلی (سیگنال خرید تازه با امتیاز " + sig.score + "، خرید قبلی " + Format.pct(gain) +
+            " در سود؛ حد ضرر و حد سود همان قبلی)"
+        announce("BUY", asset, amt, reason)
+        val hs = halfSpread(asset, null)
+        val trade = broker.addToPosition(pos.assetId, cur * (1 + hs), amt, feeFor(asset, null, true, settings), reason, topUp = true)
+        return if (trade != null) {
+            buys.add(asset.symbol + " (افزودن)")
+            journal.update(pos.assetId) { e ->
+                e.copy(
+                    amountUsd = e.amountUsd + amt,
+                    buyFeeUsd = e.buyFeeUsd + trade.feeUsd,
+                    qty = e.qty + trade.qty,
+                    scaleNote = listOfNotNull(
+                        e.scaleNote,
+                        "افزوده شد: $" + Format.num(amt) + " در قیمت $" + Format.price(trade.priceUsd) + " (" + Format.dateTime(trade.ts) +
+                            "، سیگنال تازه " + sig.score + "، خرید قبلی " + Format.pct(gain) + " در سود)"
+                    ).joinToString(" • ")
+                )
+            }
+            maybeRealBuy(settings, asset, amt, usdIrr, notes)
+            completed("BUY", asset, true, "افزودن به " + asset.symbol + " به مبلغ " + Format.num(amt) + " دلار (سیگنال تازه، خرید قبلی در سود)")
+            null
+        } else {
+            completed("BUY", asset, false, "افزودن به " + asset.symbol + " انجام نشد")
+            held
+        }
+    }
+
     /** توضیح دقیق برای موقعیتی که قیمتش زیر حد ضرر است ولی هنوز فروخته نشده. */
     private fun stopHitText(p: com.saeidkazemi.trader.data.model.Position): String {
         val ir = p.market == MarketKind.IR_STOCK || p.assetId.startsWith("ir:")
@@ -1382,6 +1490,12 @@ class TradeEngine(
                     } else sig.action == Action.BUY
                     if (!entryOk) continue
                     val acc = broker.account()
+                    val heldPos = acc.positions.firstOrNull { it.assetId == sig.assetId }
+                    if (heldPos != null) {
+                        val why = tryTopUp(heldPos, sig, m, plan, settings, equity, reserve, guard.active, assetMap, priceMap, sells, usdIrr, notes, buys)
+                        if (why != null) skip(why) else boughtHere++
+                        continue
+                    }
                     if (acc.positions.count { it.market == m } >= plan.maxPositions) {
                         stopReason = "سقف " + plan.maxPositions + " موقعیت همزمان این بازار پر است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
                         break

@@ -182,6 +182,7 @@ object ReviewReport {
                     " (" + sp(cur?.let { (it / p.avgBuyUsd - 1) * 100 }) + ") • حد ضرر $" + Format.price(p.stopLossUsd) + " • حد سود $" + Format.price(p.takeProfitUsd) +
                     (if (p.profitLockedPct > 0) " • قفل سود " + f(p.profitLockedPct, 0) + "٪" else "") + (je?.score?.let { " • امتیاز ورود $it" } ?: "") +
                     (if (p.peakUsd > 0 && p.avgBuyUsd > 0) " • قله " + sp((p.peakUsd / p.avgBuyUsd - 1) * 100) + (if (p.peakAt > 0) " (" + t(p.peakAt) + ")" else "") else "") +
+                    (if (p.topUps > 0) " • افزوده‌شده " + p.topUps + " بار" else "") +
                     (if (p.stopHitAt > 0) " • زیر حد ضرر از " + t(p.stopHitAt) + (if (p.stopHitOpen) " (بازار باز)" else " (بازار بسته)") else "")
             )
         }
@@ -236,6 +237,11 @@ object ReviewReport {
         for (m in com.saeidkazemi.trader.data.model.MarketKind.TRADED) {
             val w = bt?.guardWhy?.get(m.name) ?: continue
             line("- بی‌ضرر کردن " + m.faTitle + ": " + w)
+        }
+        line("افزودن به خرید قبلی: " + (if (!settings.topUpWinners) "خاموش" else if (settings.topUpSmart) "روشن (فقط با تأیید آزمون)" else "روشن (همه بازارها)"))
+        for (m in com.saeidkazemi.trader.data.model.MarketKind.TRADED) {
+            val w = bt?.topUpWhy?.get(m.name) ?: continue
+            line("- افزودن " + m.faTitle + ": " + w)
         }
         line("انتخاب خودکار روش: " + (if (settings.autoScaleStyle) "روشن" else "خاموش (کلید دستی خرید پله‌ای: " + settings.scaledEntryMarkets.orEmpty().joinToString(",") + ")"))
         bt?.scaleChoice?.forEach { (k, v) ->
