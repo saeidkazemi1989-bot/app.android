@@ -66,6 +66,8 @@ class TradeEngine(
         const val SCALE_DAYS = 5
         /** افزودن به خرید قبلی فقط وقتی آن خرید حداقل این‌قدر (٪) در سود است. */
         const val TOPUP_MIN_GAIN_PCT = 3.0
+        /** با نقد آزاد کافی، تعداد موقعیت‌ها تا این ضریبِ سقف عادی بالا می‌رود. */
+        const val EXTRA_POSITIONS_FACTOR = 2
         const val SCALE_TRIGGER_R = 0.5
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
@@ -494,7 +496,7 @@ class TradeEngine(
                 " • روش: " + com.saeidkazemi.trader.analysis.ScaleStudy.shortName(styleFor(settings, m))
         )
         // فاصله هر موقعیت تا فروش
-        for (p in held.take(6)) {
+        for (p in held.take(12)) {
             val cur = priceMap[p.assetId] ?: continue
             if (cur <= 0 || p.avgBuyUsd <= 0) continue
             val pnl = (cur / p.avgBuyUsd - 1) * 100
@@ -1496,9 +1498,27 @@ class TradeEngine(
                         if (why != null) skip(why) else boughtHere++
                         continue
                     }
-                    if (acc.positions.count { it.market == m } >= plan.maxPositions) {
-                        stopReason = "سقف " + plan.maxPositions + " موقعیت همزمان این بازار پر است؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
-                        break
+                    var extraNote = ""
+                    val heldCount = acc.positions.count { it.market == m }
+                    if (heldCount >= plan.maxPositions) {
+                        // سرمایه بیشتر = موقعیت بیشتر: اگر نقد آزاد خود این بازار (مثلاً بعد از افزایش سرمایه) به اندازه
+                        // یک خرید کامل است، موقعیت اضافه باز می‌شود (حداکثر دو برابر سقف عادی)
+                        val pendingNow = acc.positions.filter { it.market == m }.sumOf { it.addPendingUsd }
+                        val freeNow = (acc.cashByMarket[m.name] ?: 0.0) - reserve - pendingNow
+                        val full = maxOf(
+                            equity * plan.positionPct * (if (guard.active) com.saeidkazemi.trader.analysis.Performance.GUARD_SIZE_FACTOR else 1.0),
+                            plan.minTradeUsd
+                        )
+                        val hardCap = plan.maxPositions * EXTRA_POSITIONS_FACTOR
+                        if (!settings.extraPositions || heldCount >= hardCap || freeNow < full) {
+                            stopReason = "سقف " + plan.maxPositions + " موقعیت همزمان این بازار پر است" +
+                                (if (!settings.extraPositions) ""
+                                else if (heldCount >= hardCap) " (با موقعیت‌های اضافه هم به حداکثر " + hardCap + " رسیده)"
+                                else " و نقد آزاد ($" + Format.num(maxOf(0.0, freeNow)) + ") برای یک خرید کامل ($" + Format.num(full) + ") کافی نیست") +
+                                "؛ خرید بعدی بعد از فروش یکی از موقعیت‌ها"
+                            break
+                        }
+                        extraNote = "، موقعیت اضافه " + (heldCount + 1) + " از حداکثر " + hardCap + " چون نقد آزاد این بازار بیکار بود"
                     }
                     if (acc.positions.any { it.assetId == sig.assetId }) { skip("از قبل در پرتفوی است"); continue }
                     if (sells.contains(sig.symbol)) { skip("همین دور فروخته شد"); continue }
@@ -1580,6 +1600,7 @@ class TradeEngine(
                     val newsPart = if (sig.newsAdj != 0) "، اخبار " + ProAnalysis.signed(sig.newsAdj) else ""
                     val proPart = if (sig.proAdj != 0) "، تخصصی " + ProAnalysis.signed(sig.proAdj) else ""
                     val rrPart = plan.plannedRR(sig.metrics.volatility).takeIf { it > 0 }?.let { "، ریسک به ریوارد ۱:" + Format.trim(it, 1) } ?: ""
+                    sizeNote += extraNote
                     val reason = "خرید خودکار (" + (if (plan.entryMode == 1) "خرید در اصلاح، RSI " + Format.num(sig.metrics.rsi ?: 0.0, 0) + "، " else "") + "امتیاز " + sig.score + newsPart + proPart + rrPart + (if (plan.tuned) "، پارامتر بک‌تست" else "") + sizeNote + scalePart + ")"
                     announce("BUY", asset, firstAmt, reason)
                     val hs = halfSpread(asset, null)

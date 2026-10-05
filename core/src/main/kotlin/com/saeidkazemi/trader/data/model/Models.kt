@@ -247,7 +247,12 @@ data class AppSettings(
      */
     val topUpWinners: Boolean = true,
     /** فقط در بازارهایی که آزمون روزانه نشان دهد سود را بیشتر می‌کند. */
-    val topUpSmart: Boolean = true
+    val topUpSmart: Boolean = true,
+    /**
+     * سرمایه بیشتر = موقعیت بیشتر: وقتی سقف تعداد خرید یک بازار پر است ولی نقد آزاد خودش به اندازه یک خرید کامل
+     * است (مثلاً بعد از افزایش سرمایه)، خرید تازه انجام می‌شود (حداکثر دو برابر سقف). درخواست کاربر.
+     */
+    val extraPositions: Boolean = true
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

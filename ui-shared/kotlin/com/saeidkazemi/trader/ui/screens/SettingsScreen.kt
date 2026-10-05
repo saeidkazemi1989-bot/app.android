@@ -312,6 +312,15 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                     lineHeight = 18.sp
                 )
                 SwitchRow("سرمایه مشترک (با سقف)", state.settings.sharedCapital) { vm.toggleSharedCapital(it) }
+                Text(
+                    "سرمایه بیشتر = خرید بیشتر: اگر سقف تعداد خرید یک بازار (ارز دیجیتال ۴، بورس ۶، طلا ۳) پر باشد ولی نقد آزاد همان بازار " +
+                        "به اندازه یک خرید کامل باشد، مثلاً بعد از افزایش سرمایه، خرید تازه انجام می‌شود (حداکثر تا دو برابر سقف).",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                SwitchRow("موقعیت اضافه با نقد آزاد", state.settings.extraPositions) { vm.toggleExtraPositions(it) }
             }
         }
 

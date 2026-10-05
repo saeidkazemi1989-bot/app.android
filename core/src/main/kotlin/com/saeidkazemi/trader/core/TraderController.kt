@@ -515,6 +515,11 @@ class TraderController(
             else "سرمایه مشترک خاموش شد؛ هر بازار فقط با نقد خودش خرید می‌کند.")
     }
 
+    fun toggleExtraPositions(on: Boolean) {
+        updateSettings { it.copy(extraPositions = on) }
+        toast(if (on) "موقعیت اضافه روشن شد: با نقد آزاد کافی، بیشتر از سقف عادی (تا دو برابر) خرید می‌کند." else "موقعیت اضافه خاموش شد؛ فقط تا سقف عادی هر بازار.")
+    }
+
     /** افزودن به خرید قبلی وقتی در سود است و سیگنال تازه می‌دهد. */
     fun toggleTopUp(on: Boolean) {
         updateSettings { it.copy(topUpWinners = on) }
