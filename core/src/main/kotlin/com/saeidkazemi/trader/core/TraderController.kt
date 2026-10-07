@@ -489,6 +489,23 @@ class TraderController(
         s.copy(riskLevel = level, marketRisk = s.marketRisk.mapValues { level })
     }
 
+    /**
+     * تعداد خرید همزمان و حجم هر خرید یک بازار (درخواست کاربر). null = برگشت به پیش‌فرض.
+     * خریدهای باز دست نمی‌خورند؛ از خرید بعدی اعمال می‌شود.
+     */
+    fun setSizing(market: com.saeidkazemi.trader.data.model.MarketKind, maxPositions: Int?, positionPct: Double?) {
+        updateSettings { s ->
+            val (dn, dp) = container.tradeEngine.defaultSizing(s, market)
+            val n = maxPositions?.coerceIn(1, com.saeidkazemi.trader.trading.TradeEngine.MAX_POSITIONS_SETTING)
+            val p = positionPct?.coerceIn(5.0, com.saeidkazemi.trader.trading.TradeEngine.MAX_POSITION_PCT_SETTING)
+            val mp = s.maxPositionsByMarket.orEmpty().toMutableMap()
+            val pp = s.positionPctByMarket.orEmpty().toMutableMap()
+            if (n == null || n == dn) mp.remove(market.name) else mp[market.name] = n
+            if (p == null || kotlin.math.abs(p - dp) < 0.01) pp.remove(market.name) else pp[market.name] = p
+            s.copy(maxPositionsByMarket = mp, positionPctByMarket = pp)
+        }
+    }
+
     /** سطح ریسک جداگانه یک بازار. */
     fun setMarketRisk(market: com.saeidkazemi.trader.data.model.MarketKind, level: String) =
         updateSettings { it.copy(marketRisk = it.marketRisk + (market.name to level)) }

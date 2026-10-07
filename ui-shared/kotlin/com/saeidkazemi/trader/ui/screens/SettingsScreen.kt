@@ -200,6 +200,46 @@ fun SettingsScreen(state: UiState, vm: TraderController) {
                         }
                     }
                     val plan = vm.container.tradeEngine.planFor(state.settings, m)
+                    // تعداد خرید همزمان و حجم هر خرید (دستی)
+                    val nNow = plan.maxPositions
+                    val pNow = Math.round(plan.positionPct * 100).toDouble()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("تعداد خرید همزمان", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = { vm.setSizing(m, nNow - 1, pNow) }, enabled = nNow > 1) { Text("−") }
+                        Text(" " + nNow + " ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        OutlinedButton(onClick = { vm.setSizing(m, nNow + 1, pNow) }, enabled = nNow < com.saeidkazemi.trader.trading.TradeEngine.MAX_POSITIONS_SETTING) { Text("+") }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("حجم هر خرید (٪ این بخش)", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = { vm.setSizing(m, nNow, pNow - 5) }, enabled = pNow > 5) { Text("−") }
+                        Text(" " + Format.num(pNow, 0) + "٪ ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        OutlinedButton(onClick = { vm.setSizing(m, nNow, pNow + 5) }, enabled = pNow < com.saeidkazemi.trader.trading.TradeEngine.MAX_POSITION_PCT_SETTING) { Text("+") }
+                    }
+                    val acct = state.account
+                    run {
+                        val sleeve = acct.capitalByMarket[m.name] ?: 0.0
+                        val used = nNow * pNow
+                        Text(
+                            "هر خرید حدود $" + Format.num(sleeve * pNow / 100, 0) + " (از سرمایه این بخش $" + Format.num(sleeve, 0) + ")" +
+                                (if (used > 100.5) "؛ " + nNow + " × " + Format.num(pNow, 0) + "٪ بیشتر از ۱۰۰٪ است: با سرمایه مشترک از نقد بیکار بازارهای دیگر خرید می‌شود (تا سقف " +
+                                    Format.num(state.settings.maxMarketSharePct, 0) + "٪ کل سرمایه)، وگرنه خریدهای آخر کوچک‌تر می‌شوند" else ""),
+                            fontSize = 10.sp,
+                            color = if (used > 100.5) Color(0xFFB7791F) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    val (dn, dp) = vm.container.tradeEngine.defaultSizing(state.settings, m)
+                    if (nNow != dn || kotlin.math.abs(pNow - dp) > 0.5) {
+                        TextButton(onClick = { vm.setSizing(m, null, null) }) {
+                            Text("برگشت به پیش‌فرض (" + dn + " خرید، هر کدام " + Format.num(dp, 0) + "٪)", fontSize = 11.sp)
+                        }
+                    }
                     Text(
                         (if (plan.tuned) "✓ پارامتر بک‌تست • " else "") +
                         "تا " + plan.maxPositions + " موقعیت، هر کدام " + Format.num(plan.positionPct * 100, 0) + "٪ این بخش، " +

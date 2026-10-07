@@ -252,7 +252,11 @@ data class AppSettings(
      * سرمایه بیشتر = موقعیت بیشتر: وقتی سقف تعداد خرید یک بازار پر است ولی نقد آزاد خودش به اندازه یک خرید کامل
      * است (مثلاً بعد از افزایش سرمایه)، خرید تازه انجام می‌شود (حداکثر دو برابر سقف). درخواست کاربر.
      */
-    val extraPositions: Boolean = true
+    val extraPositions: Boolean = true,
+    /** تعداد خرید همزمان دستی هر بازار (جای پیش‌فرض سطح ریسک)؛ نبودن کلید = پیش‌فرض. */
+    val maxPositionsByMarket: Map<String, Int>? = null,
+    /** حجم هر خرید دستی هر بازار (درصد از سرمایه همان بازار)؛ نبودن کلید = پیش‌فرض. */
+    val positionPctByMarket: Map<String, Double>? = null
 ) {
     fun scaledEntry(m: MarketKind): Boolean = scaledEntryMarkets.orEmpty().contains(m.name)
     fun allocationPct(m: MarketKind): Double = allocations[m.name] ?: 0.0

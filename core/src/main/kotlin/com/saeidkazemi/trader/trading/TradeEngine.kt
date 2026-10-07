@@ -68,6 +68,8 @@ class TradeEngine(
         const val TOPUP_MIN_GAIN_PCT = 3.0
         /** با نقد آزاد کافی، تعداد موقعیت‌ها تا این ضریبِ سقف عادی بالا می‌رود. */
         const val EXTRA_POSITIONS_FACTOR = 2
+        const val MAX_POSITIONS_SETTING = 20
+        const val MAX_POSITION_PCT_SETTING = 60.0
         const val SCALE_TRIGGER_R = 0.5
         /** تعداد بهترین فرصت‌های تکنیکال که در هر دور اخبارشان بررسی می‌شود. */
         const val NEWS_CANDIDATES = 10
@@ -103,9 +105,23 @@ class TradeEngine(
     /** برنامه ریسک هر بازار؛ اگر بک‌تست پارامتر تأییدشده داشته باشد، حد سود/ضرر/آستانه/مهلت از آن می‌آید. */
     fun planFor(settings: AppSettings, m: MarketKind): RiskManager.Plan {
         val base = riskManager.plan(settings.riskFor(m), m)
-        if (!settings.useBacktestParams) return base
-        val p = backtest?.appliedFor(m) ?: return base
-        return Backtest.applyTo(base, p, settings.buyThreshold)
+        val p = if (settings.useBacktestParams) backtest?.appliedFor(m) else null
+        val tuned = if (p != null) Backtest.applyTo(base, p, settings.buyThreshold) else base
+        return withSizing(settings, m, tuned)
+    }
+
+    /** تعداد خرید همزمان و حجم هر خرید که کاربر در تنظیمات برای این بازار گذاشته (اگر گذاشته باشد). */
+    private fun withSizing(settings: AppSettings, m: MarketKind, plan: RiskManager.Plan): RiskManager.Plan {
+        val n = settings.maxPositionsByMarket?.get(m.name)?.takeIf { it in 1..MAX_POSITIONS_SETTING }
+        val pct = settings.positionPctByMarket?.get(m.name)?.takeIf { it.isFinite() && it in 1.0..MAX_POSITION_PCT_SETTING }
+        if (n == null && pct == null) return plan
+        return plan.copy(maxPositions = n ?: plan.maxPositions, positionPct = (pct?.div(100.0)) ?: plan.positionPct)
+    }
+
+    /** پیش‌فرض سطح ریسک (بدون تنظیم دستی) برای نمایش در تنظیمات. */
+    fun defaultSizing(settings: AppSettings, m: MarketKind): Pair<Int, Double> {
+        val b = riskManager.plan(settings.riskFor(m), m)
+        return b.maxPositions to b.positionPct * 100
     }
 
     /** روش ورود/خروج فعال یک بازار (کد ScaleStudy): خودکار از آزمون روزانه، یا کلید دستی خرید پله‌ای. */
