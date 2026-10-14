@@ -86,6 +86,22 @@ object ReportUploader {
                 }
             }
         }
+        // بررسی: آیا پیام‌ها واقعاً روی سرور ذخیره شدند؟ (چند بار کد داده شد ولی کانال روی سرور خالی بود)
+        var stored = -1
+        repeat(3) { attempt ->
+            if (stored >= parts.size) return@repeat
+            try {
+                stored = relay.poll(t, "all").count { (it.text ?: "").startsWith("MYR1 ") }
+            } catch (_: Exception) {
+            }
+            if (stored < parts.size) Thread.sleep(1500L * (attempt + 1))
+        }
+        if (stored in 0 until parts.size) {
+            throw IllegalStateException(
+                "گزارش روی سرور ذخیره نشد (" + stored + " از " + parts.size + " بخش)؛ احتمالاً اینترنت یا فیلترینگ مسیر را قطع کرده است. " +
+                    "دوباره امتحان کنید یا «کپی خلاصه» را بزنید و متن را مستقیم بفرستید"
+            )
+        }
         return code
     }
 }
