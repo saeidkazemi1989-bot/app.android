@@ -114,9 +114,24 @@ fun ReviewCard(state: UiState, vm: TraderController) {
                     .background(GoodC.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                     .padding(10.dp)
             ) {
+                // ntfy.sh گزارش را حدود ۱۲ ساعت نگه می‌دارد؛ کد قدیمی دیگر خوانده نمی‌شود
+                val ageMs = System.currentTimeMillis() - state.reportCodeAt
+                val expired = state.reportCodeAt <= 0L || ageMs > 11L * 3_600_000L
+                if (expired) {
+                    Text(
+                        "این کد قدیمی است و روی سرور پاک شده؛ برای تحلیلگر نفرستید. دکمه «ارسال برای تحلیل» را بزنید تا کد تازه بسازد.",
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE5484D), lineHeight = 18.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                } else {
+                    Text(
+                        "ساخته‌شده " + (ageMs / 60_000L) + " دقیقه پیش",
+                        fontSize = 10.sp, color = muted
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("کد گزارش: " + state.reportCode, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = GoodC)
-                    OutlinedButton(onClick = {
+                    Text("کد گزارش: " + state.reportCode, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = if (expired) muted else GoodC)
+                    OutlinedButton(enabled = !expired, onClick = {
                         clipboard.setText(AnnotatedString("کد گزارش معامله‌یار: " + state.reportCode))
                         vm.toast("کد گزارش کپی شد؛ آن را برای تحلیلگر بفرستید.")
                     }) { Text("کپی کد", fontSize = 12.sp) }

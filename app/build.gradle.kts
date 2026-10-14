@@ -12,8 +12,8 @@ android {
         applicationId = "com.saeidkazemi.trader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 35
-        versionName = "1.16.0"
+        versionCode = 36
+        versionName = "1.16.1"
     }
 
     // کلید امضای ثابت: همه نسخه‌ها با یک کلید امضا می‌شوند تا نسخه جدید روی نسخه قبلی نصب (به‌روزرسانی) شود.
