@@ -93,7 +93,8 @@ class MarketDataService {
 
     fun iranQuote(assetId: String): IranStockSource.Quote? = iranSource.quote(assetId)
 
-    fun iranAdjustment(assetId: String): Pair<Int, Double>? = iranSource.adjustmentFor(assetId)
+    fun iranAdjustment(assetId: String, prevSeenIrr: Double = 0.0, prevSeenAt: Long = 0L): Pair<Int, Double>? =
+        iranSource.adjustmentFor(assetId, prevSeenIrr, prevSeenAt)
 
     /** حقیقی/حقوقی امروز یک سهم. */
     fun iranFlow(assetId: String): IranStockSource.ClientFlow? = iranSource.flowOf(assetId)

@@ -183,6 +183,7 @@ object ReviewReport {
                     (if (p.profitLockedPct > 0) " • قفل سود " + f(p.profitLockedPct, 0) + "٪" else "") + (je?.score?.let { " • امتیاز ورود $it" } ?: "") +
                     (if (p.peakUsd > 0 && p.avgBuyUsd > 0) " • قله " + sp((p.peakUsd / p.avgBuyUsd - 1) * 100) + (if (p.peakAt > 0) " (" + t(p.peakAt) + ")" else "") else "") +
                     (if (p.topUps > 0) " • افزوده‌شده " + p.topUps + " بار" else "") +
+                    (p.adjDay?.let { d -> " • تعدیل‌شده " + d + (je?.let { e -> " (تعداد " + Format.price(p.qty) + " در برابر خرید " + Format.price(e.qty) + ")" } ?: "") } ?: "") +
                     (if (p.stopHitAt > 0) " • زیر حد ضرر از " + t(p.stopHitAt) + (if (p.stopHitOpen) " (بازار باز)" else " (بازار بسته)") else "")
             )
         }

@@ -300,6 +300,27 @@ class PaperBroker(private val store: JsonStore) : Broker {
     }
 
     /** ثبت نرخ دلار ثابت برای موقعیت‌های ریالی قدیمی (قبل از نسخه ۱.۵.۲). */
+    /**
+     * برگرداندن «تعدیل» اشتباه: نسخه‌های قبل گاهی تغییر قیمت چند روز را افزایش سرمایه حساب می‌کردند و تعداد سهم را کم
+     * (و قیمت خرید و حد ضرر را بالا) می‌بردند. u نسبت تعداد درست (ژورنال) به تعداد فعلی است.
+     */
+    fun undoAdjust(assetId: String, u: Double): Boolean = synchronized(lock) {
+        if (!u.isFinite() || u <= 1.0 || u >= 2.0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        val fixed = pos.copy(
+            qty = pos.qty * u,
+            avgBuyUsd = pos.avgBuyUsd / u,
+            stopLossUsd = pos.stopLossUsd / u,
+            takeProfitUsd = pos.takeProfitUsd / u,
+            peakUsd = pos.peakUsd / u
+        )
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) fixed else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
     fun setFxRate(assetId: String, rate: Double): Boolean = synchronized(lock) {
         if (!rate.isFinite() || rate <= 0) return@synchronized false
         val a = ensure()

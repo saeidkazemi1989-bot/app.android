@@ -42,6 +42,19 @@ class PositionTracker(private val store: JsonStore?) {
         }
     }
 
+    /** بعد از افزایش سرمایه: نقاط قبل از روز تعدیل با همان ضریب کوچک می‌شوند تا نمودار و بیشترین سود/زیان پیوسته بمانند. */
+    fun scale(assetId: String, factor: Double, beforeMs: Long) {
+        if (!factor.isFinite() || factor <= 0) return
+        synchronized(lock) {
+            val list = ensure()[assetId] ?: return
+            for (i in list.indices) if (list[i].t < beforeMs) list[i] = list[i].copy(price = list[i].price * factor)
+            try {
+                store?.saveTracks(ensure())
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun track(assetId: String): List<PricePoint> = synchronized(lock) { ensure()[assetId]?.toList().orEmpty() }
 
     /** ثبت قیمت فعلی همه موقعیت‌های باز و حذف مسیر موقعیت‌های بسته‌شده. */

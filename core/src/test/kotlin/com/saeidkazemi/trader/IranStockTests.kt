@@ -64,6 +64,31 @@ class IranStockTests {
     }
 
     @Test
+    fun intradayAdjustmentIgnoresStaleHistory() {
+        val z = com.saeidkazemi.trader.util.IranMarket.ZONE
+        fun ms(y: Int, mo: Int, d: Int, h: Int) = java.time.LocalDateTime.of(y, mo, d, h, 0).atZone(z).toInstant().toEpochMilli()
+        val now = ms(2026, 10, 14, 10) // چهارشنبه ۱۰ صبح
+        val rows = listOf(DailyRow(20261012, 950.0, 940.0), DailyRow(20261013, 1000.0, 950.0))
+        val fresh = ms(2026, 10, 14, 8)
+        val stale = ms(2026, 10, 12, 20)
+        // افزایش سرمایه ۱۰۰٪ با تاریخچه تازه
+        assertEquals(0.5, IranStockSource.intradayAdjustment(rows, fresh, 500.0, 10.0, 0.0, 0L, now)!!.second, 1e-9)
+        // روز عادی
+        assertEquals(null, IranStockSource.intradayAdjustment(rows, fresh, 1000.0, 10.0, 0.0, 0L, now))
+        // «ضریب» بزرگ‌تر از ۱ هرگز تعدیل نیست
+        assertEquals(null, IranStockSource.intradayAdjustment(rows, fresh, 1050.0, 10.0, 0.0, 0L, now))
+        // تاریخچه کهنه: تغییر قیمت چند روز نباید تعدیل حساب شود
+        assertEquals(null, IranStockSource.intradayAdjustment(rows, stale, 960.0, 10.0, 0.0, 0L, now))
+        assertEquals(null, IranStockSource.intradayAdjustment(rows, stale, 1040.0, 10.0, 0.0, 0L, now))
+        // بدون تاریخچه تازه: فقط افت خیلی بزرگ نسبت به آخرین قیمت دیده‌شده
+        val seenAt = ms(2026, 10, 13, 12)
+        assertEquals(0.5, IranStockSource.intradayAdjustment(null, 0L, 500.0, 10.0, 1000.0, seenAt, now)!!.second, 1e-9)
+        assertEquals(null, IranStockSource.intradayAdjustment(null, 0L, 950.0, 10.0, 1000.0, seenAt, now))
+        // هنوز معامله‌ای نشده
+        assertEquals(null, IranStockSource.intradayAdjustment(rows, fresh, 500.0, 0.0, 0.0, 0L, now))
+    }
+
+    @Test
     fun parsesDailyList() {
         val json = """{"closingPriceDaily":[
             {"dEven":20230524,"pClosing":24652.0,"priceYesterday":24417.0},

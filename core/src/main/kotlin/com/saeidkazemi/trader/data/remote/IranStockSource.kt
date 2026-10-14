@@ -352,8 +352,54 @@ class IranStockSource {
                 val prev = rows[i - 1].close
                 if (y > 0 && prev > 0) {
                     val r = y / prev
-                    if (kotlin.math.abs(r - 1) > 0.002 && r > 0.1 && r < 1.5) return rows[i].dEven to r
+                    // فقط افت قیمت (افزایش سرمایه/تقسیم سود)؛ «ضریب بزرگ‌تر از ۱» برای موقعیت باز تقریباً همیشه خطای داده است.
+                    if (r > 0.1 && r < 1 - ADJ_MIN) return rows[i].dEven to r
                 }
+            }
+            return null
+        }
+
+        /** کمترین افت «قیمت دیروز» که رویداد تعدیل حساب می‌شود (کمتر از این، گرد کردن است). */
+        const val ADJ_MIN = 0.002
+
+        /** پشتیبان بدون تاریخچه: فقط افت‌های بزرگ (بیش از ۱۵٪) که با نوسان عادی یک روز (حداکثر ±۵٪ تا ±۱۰٪) ممکن نیست. */
+        const val ADJ_BIG_DROP = 0.85
+
+        /** پایان آخرین جلسه معاملاتی قبل از امروز + ۲ ساعت (تا قیمت پایانی آن روز نهایی شده باشد). */
+        fun lastSessionSettledMs(nowMs: Long): Long {
+            var d = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(nowMs), IranMarket.ZONE).toLocalDate().minusDays(1)
+            while (!IranMarket.isTradingDay(d)) d = d.minusDays(1)
+            return d.atTime(IranMarket.CLOSE).atZone(IranMarket.ZONE).toInstant().toEpochMilli() + 2 * 3_600_000L
+        }
+
+        /**
+         * تشخیص افزایش سرمایه/تقسیم سود «امروز» برای یک موقعیت باز.
+         * ۱) اگر تاریخچه بعد از نهایی شدن جلسه قبل گرفته شده: «قیمت دیروز» امروز باید با پایانی آخرین روز برابر باشد؛
+         *    اگر کمتر است، همان ضریب تعدیل است. (تاریخچه کهنه، مثلاً وقتی دریافتش چند روز شکست خورده، استفاده نمی‌شود؛
+         *    قبلاً تغییر قیمت چند روز به اشتباه «تعدیل» حساب می‌شد و سود/حد ضرر موقعیت را خراب می‌کرد.)
+         * ۲) پشتیبان: آخرین قیمتی که خودمان قبل از شروع امروز دیده‌ایم؛ فقط برای افت‌های خیلی بزرگ.
+         */
+        fun intradayAdjustment(
+            rows: List<DailyRow>?,
+            rowsFetchedAt: Long,
+            yesterday: Double,
+            trades: Double,
+            prevSeenIrr: Double,
+            prevSeenAt: Long,
+            nowMs: Long
+        ): Pair<Int, Double>? {
+            if (yesterday <= 0 || trades <= 0) return null
+            val today = IranMarket.todayInt(nowMs)
+            val openMs = IranMarket.dayStartMs(today) + 9 * 3_600_000L
+            if (rows != null && rows.isNotEmpty() && rows.last().dEven < today && rows.last().close > 0 &&
+                rowsFetchedAt >= lastSessionSettledMs(nowMs)
+            ) {
+                val f = yesterday / rows.last().close
+                return if (f > 0.1 && f < 1 - ADJ_MIN) today to f else null
+            }
+            if (prevSeenIrr > 0 && prevSeenAt in (openMs - 10 * 86_400_000L) until openMs) {
+                val f = yesterday / prevSeenIrr
+                if (f > 0.1 && f < ADJ_BIG_DROP) return today to f
             }
             return null
         }
@@ -391,6 +437,9 @@ class IranStockSource {
 
     /** آخرین ردیف‌های تاریخچه (خام) هر نماد برای تشخیص افزایش سرمایه. */
     private val dailyRows = ConcurrentHashMap<String, List<DailyRow>>()
+
+    /** زمان دریافت آخرین ردیف‌های تاریخچه هر نماد (برای کنار گذاشتن تاریخچه کهنه). */
+    private val dailyRowsAt = ConcurrentHashMap<String, Long>()
 
     /** حقیقی/حقوقی امروز همه نمادها (کلید: شناسه دارایی). */
     @Volatile
@@ -570,7 +619,10 @@ class IranStockSource {
         val insCode = asset.id.removePrefix("ir:")
         val rows = parseDaily(get(API + "ClosingPrice/GetClosingPriceDailyList/$insCode/$days"))
         if (rows.isEmpty()) return emptyList()
-        if (days <= 150) dailyRows[asset.id] = rows.takeLast(10)
+        if (days <= 150) {
+            dailyRows[asset.id] = rows.takeLast(10)
+            dailyRowsAt[asset.id] = System.currentTimeMillis()
+        }
         // تاریخچه ورود/خروج پول حقیقی (۲۰ روز)؛ شکستش مانع تحلیل نمی‌شود.
         if (days <= 150) try {
             val fh = parseClientTypeHistory(get(API + "ClientType/GetClientTypeHistory/$insCode")).take(20)
@@ -603,15 +655,14 @@ class IranStockSource {
      * آخرین افزایش سرمایه/تقسیم سود (روز yyyymmdd، ضریب قیمت) برای اصلاح موقعیت‌های باز.
      * ضریب ۰٫۵ یعنی قیمت نصف شده و تعداد سهم باید دو برابر شود.
      */
-    fun adjustmentFor(assetId: String): Pair<Int, Double>? {
-        val rows = dailyRows[assetId] ?: return null
+    fun adjustmentFor(assetId: String, prevSeenIrr: Double = 0.0, prevSeenAt: Long = 0L): Pair<Int, Double>? {
+        val rows = dailyRows[assetId]
         val q = quotes[assetId]
-        val today = IranMarket.todayInt()
-        if (q != null && rows.isNotEmpty() && rows.last().dEven < today && q.trades > 0 && q.yesterday > 0) {
-            val f = q.yesterday / rows.last().close
-            if (kotlin.math.abs(f - 1) > 0.002 && f > 0.1 && f < 1.5) return today to f
+        if (q != null) {
+            intradayAdjustment(rows, dailyRowsAt[assetId] ?: 0L, q.yesterday, q.trades, prevSeenIrr, prevSeenAt, System.currentTimeMillis())
+                ?.let { return it }
         }
-        return lastAdjustment(rows)
+        return rows?.let { lastAdjustment(it) }
     }
 
     private fun simulatedHistory(asset: Asset): List<PricePoint> {

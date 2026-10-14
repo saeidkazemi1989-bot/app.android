@@ -1196,12 +1196,39 @@ class TradeEngine(
 
         if (manage) migrateFxLocks(settings, notes)
 
+        // ترمیم «تعدیل‌های» اشتباه نسخه‌های قبل: افزایش سرمایه همیشه قیمت را پایین می‌آورد و تعداد سهم را زیاد می‌کند؛
+        // اگر تعداد سهم موقعیت از تعداد خریده‌شده (ژورنال) کمتر شده، تعدیل اشتباه بوده و برگردانده می‌شود.
+        if (manage) for (pos in broker.account().positions) {
+            if (!pos.assetId.startsWith("ir:") || pos.adjDay == null || pos.qty <= 0) continue
+            val je = journal.all().lastOrNull { it.assetId == pos.assetId && it.isOpen } ?: continue
+            if (je.qty <= 0 || je.openedAt > pos.openedAt + 60_000L) continue
+            val u = je.qty / pos.qty
+            if (u > 1.005 && u < 2.0 && broker.undoAdjust(pos.assetId, u)) {
+                notes.add("خطای تعدیل " + pos.symbol + " برطرف شد: تعداد سهم به " + Format.price(je.qty) + " (همان تعداد خریده‌شده) برگشت و حد ضرر به جای درستش آمد.")
+            }
+        }
+
         // اصلاح موقعیت‌های سهام پس از افزایش سرمایه/تقسیم سود (تا افت قیمت پس از مجمع، زیان کاذب یا حد ضرر نسازد).
         for (pos in broker.account().positions) {
-            if (pos.market != MarketKind.IR_STOCK) continue
-            val (day, factor) = market.iranAdjustment(pos.assetId) ?: continue
+            if (!pos.assetId.startsWith("ir:")) continue
+            // آخرین قیمتی که خودمان قبل از شروع جلسه امروز دیده‌ایم (به ریال)، برای وقتی که تاریخچه رسمی در دسترس نیست
+            val openToday = IranMarket.dayStartMs(IranMarket.todayInt()) + 9 * 3_600_000L
+            val seen = tracker.track(pos.assetId).lastOrNull { it.t < openToday && it.t > pos.openedAt }
+            val seenIrr = if (seen != null && pos.fxRate > 0) seen.price * pos.fxRate else 0.0
+            val (day, factor) = market.iranAdjustment(pos.assetId, seenIrr, seen?.t ?: 0L) ?: continue
             if (pos.openedAt >= IranMarket.dayStartMs(day)) continue
             if (broker.adjustPosition(pos.assetId, factor, day)) {
+                tracker.scale(pos.assetId, factor, IranMarket.dayStartMs(day))
+                journal.update(pos.assetId) {
+                    it.copy(
+                        entryUsd = it.entryUsd * factor,
+                        qty = it.qty / factor,
+                        scaleNote = listOfNotNull(
+                            it.scaleNote,
+                            "تعدیل افزایش سرمایه/تقسیم سود با ضریب " + Format.num(factor, 3) + " (" + Format.dateTime(System.currentTimeMillis()) + ")"
+                        ).joinToString(" • ")
+                    )
+                }
                 notes.add("موقعیت " + pos.symbol + " بابت افزایش سرمایه/تقسیم سود تعدیل شد (ضریب " + Format.num(factor, 3) + ").")
             }
         }
