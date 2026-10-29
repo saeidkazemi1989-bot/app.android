@@ -321,6 +321,62 @@ class PaperBroker(private val store: JsonStore) : Broker {
         true
     }
 
+    /** ضرب تعداد سهم در m و تقسیم قیمت خرید، حد ضرر، حد سود و قله بر m (ارزش موقعیت در قیمت فعلی تغییر می‌کند). */
+    fun scalePosition(assetId: String, m: Double): Boolean = synchronized(lock) {
+        if (!m.isFinite() || m <= 0.1 || m >= 10.0) return@synchronized false
+        val a = ensure()
+        val pos = a.positions.firstOrNull { it.assetId == assetId } ?: return@synchronized false
+        val fixed = pos.copy(
+            qty = pos.qty * m,
+            avgBuyUsd = pos.avgBuyUsd / m,
+            stopLossUsd = pos.stopLossUsd / m,
+            takeProfitUsd = pos.takeProfitUsd / m,
+            peakUsd = pos.peakUsd / m
+        )
+        val next = a.copy(positions = a.positions.map { if (it.assetId == assetId) fixed else it })
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
+    /**
+     * اصلاح سود تحقق‌یافته یک بازار (مثلاً وقتی معلوم شود فروشی با تعداد سهم اشتباه حساب شده). delta منفی یعنی
+     * سود واقعی کمتر بوده؛ از نقد همان بازار و اگر کافی نبود از نقد بقیه بازارها کم می‌شود.
+     */
+    fun correctRealized(market: MarketKind, delta: Double): Boolean = synchronized(lock) {
+        if (!delta.isFinite() || delta == 0.0) return@synchronized false
+        val a = ensure()
+        val key = market.name
+        val cash = HashMap(a.cashByMarket)
+        var rest = delta
+        if (rest > 0) {
+            cash[key] = (cash[key] ?: 0.0) + rest
+            rest = 0.0
+        } else {
+            val own = (cash[key] ?: 0.0)
+            val take = minOf(own, -rest)
+            cash[key] = own - take
+            rest += take
+            for (k in cash.keys.sortedByDescending { cash[it] ?: 0.0 }) {
+                if (rest >= 0) break
+                val c = cash[k] ?: 0.0
+                val t = minOf(c, -rest)
+                cash[k] = c - t
+                rest += t
+            }
+            if (rest < 0) cash[key] = (cash[key] ?: 0.0) + rest
+        }
+        val next = a.copy(
+            cashUsd = a.cashUsd + delta,
+            cashByMarket = cash,
+            realizedPnlUsd = a.realizedPnlUsd + delta,
+            realizedByMarket = a.realizedByMarket + (key to ((a.realizedByMarket[key] ?: 0.0) + delta))
+        )
+        acc = next
+        store.saveAccount(next)
+        true
+    }
+
     fun setFxRate(assetId: String, rate: Double): Boolean = synchronized(lock) {
         if (!rate.isFinite() || rate <= 0) return@synchronized false
         val a = ensure()

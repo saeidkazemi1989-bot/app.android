@@ -60,6 +60,26 @@ class TradeEngine(
 ) {
 
     companion object {
+        const val REVERT_MARK = "برگشت تعدیل اشتباه"
+
+        private val ADJ_NOTE = Regex("""تعدیل افزایش سرمایه/تقسیم سود با ضریب ([0-9.,]+) \((\d{4}/\d{2}/\d{2} \d{2}:\d{2})\)""")
+
+        /**
+         * تعدیل‌هایی از یادداشت ژورنال که خارج از ساعت جلسه بورس (روز تعطیل یا قبل از ۹ صبح) ثبت شده‌اند و
+         * بنابراین اشتباه بوده‌اند: (زمان، ضریب).
+         */
+        fun offSessionAdjustments(note: String, tz: java.util.TimeZone = java.util.TimeZone.getDefault()): List<Pair<Long, Double>> {
+            val fmt = java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.US).apply { timeZone = tz }
+            return ADJ_NOTE.findAll(note).mapNotNull { mt ->
+                val f = mt.groupValues[1].replace(",", "").toDoubleOrNull() ?: return@mapNotNull null
+                val ts = try { fmt.parse(mt.groupValues[2])?.time } catch (_: Exception) { null } ?: return@mapNotNull null
+                if (f <= 0.1 || f >= 1.0) return@mapNotNull null
+                val z = java.time.Instant.ofEpochMilli(ts).atZone(IranMarket.ZONE)
+                val inSession = IranMarket.isTradingDay(z.toLocalDate()) && !z.toLocalTime().isBefore(IranMarket.OPEN)
+                if (inSession) null else ts to f
+            }.toList()
+        }
+
         /** کمترین مبلغ خرید با «باقی‌مانده نقد» یک بازار (بالاتر از حداقل سفارش ۳۰۰ هزار تومانی نوبیتکس). */
         const val LEFTOVER_MIN_USD = 4.0
         /** خرید پله‌ای با تأیید: مهلت پله دوم (روز) و رشد لازم (کسری از فاصله حد ضرر) — همان آزمون «I». */
@@ -548,6 +568,53 @@ class TradeEngine(
             details = details,
             lastTradeAt = lastTrade
         )
+    }
+
+    /**
+     * برگرداندن «تعدیل‌های» اشتباه نسخه ۱.۱۶.۳: آن نسخه بعد از نیمه‌شب، قبل از ساعت ۹ و در روزهای تعطیل داده جلسه
+     * قبل را با داده امروز اشتباه می‌گرفت و رشد عادی قیمت را «افزایش سرمایه» حساب می‌کرد؛ تعداد سهم زیاد و قیمت خرید
+     * کم می‌شد و سود کاذب ساخته می‌شد. هر تعدیلی که خارج از ساعت جلسه ثبت شده برگردانده می‌شود: برای خرید باز
+     * تعداد و قیمت‌ها، برای معامله بسته سود ثبت‌شده (و نقد). هر ردیف فقط یک بار (با یادداشت «برگشت تعدیل اشتباه»).
+     */
+    private fun revertOffSessionAdjustments(notes: MutableList<String>) {
+        val open = broker.account().positions.associateBy { it.assetId }
+        for (e in journal.all()) {
+            if (!e.assetId.startsWith("ir:")) continue
+            val note = e.scaleNote ?: continue
+            if (note.contains(REVERT_MARK)) continue
+            val bad = offSessionAdjustments(note)
+            if (bad.isEmpty()) continue
+            val m = bad.fold(1.0) { prod, adj -> prod * adj.second }
+            if (!m.isFinite() || m <= 0.1 || m >= 1.0) continue
+            val stamp = REVERT_MARK + " (ضریب کل " + Format.num(m, 3) + "، " + Format.dateTime(System.currentTimeMillis()) + ")"
+            if (e.isOpen) {
+                val pos = open[e.assetId] ?: continue
+                if (pos.openedAt > e.openedAt + 60_000L || e.openedAt > pos.openedAt + 60_000L) continue
+                if (!broker.scalePosition(e.assetId, m)) continue
+                for ((ts, f) in bad) tracker.scale(e.assetId, 1 / f, IranMarket.dayStartMs(IranMarket.todayInt(ts)))
+                journal.updateById(e.id) {
+                    it.copy(entryUsd = it.entryUsd / m, qty = it.qty * m, scaleNote = listOfNotNull(it.scaleNote, stamp).joinToString(" • "))
+                }
+                notes.add("تعدیل اشتباه " + e.symbol + " برگشت: تعداد سهم و قیمت خرید به مقدار واقعی برگشت (سود کاذب حذف شد).")
+            } else {
+                val proceeds = e.proceedsUsd ?: continue
+                val delta = proceeds * (m - 1)
+                if (!delta.isFinite() || delta >= 0) continue
+                broker.correctRealized(e.market, delta)
+                journal.updateById(e.id) {
+                    val pnl = (it.pnlUsd ?: 0.0) + delta
+                    it.copy(
+                        entryUsd = it.entryUsd / m,
+                        qty = it.qty * m,
+                        proceedsUsd = proceeds + delta,
+                        pnlUsd = pnl,
+                        pnlPct = if (it.amountUsd > 0) pnl / it.amountUsd * 100 else it.pnlPct,
+                        scaleNote = listOfNotNull(it.scaleNote, stamp).joinToString(" • ")
+                    )
+                }
+                notes.add("سود ثبت‌شده " + e.symbol + " اصلاح شد (" + Format.num(delta) + " دلار): بخشی از آن ناشی از تعدیل اشتباه بود.")
+            }
+        }
     }
 
     /** موقعیت‌های ریالی قدیمی: نرخ دلار لحظه خرید از ژورنال بازسازی و ثابت می‌شود. */
@@ -1208,9 +1275,12 @@ class TradeEngine(
             }
         }
 
+        if (manage) revertOffSessionAdjustments(notes)
+
         // اصلاح موقعیت‌های سهام پس از افزایش سرمایه/تقسیم سود (تا افت قیمت پس از مجمع، زیان کاذب یا حد ضرر نسازد).
-        for (pos in broker.account().positions) {
-            if (!pos.assetId.startsWith("ir:")) continue
+        // صندوق‌های طلا افزایش سرمایه ندارند و تعدیل نمی‌شوند.
+        for (pos in if (manage) broker.account().positions else emptyList()) {
+            if (pos.market != MarketKind.IR_STOCK || !pos.assetId.startsWith("ir:")) continue
             // آخرین قیمتی که خودمان قبل از شروع جلسه امروز دیده‌ایم (به ریال)، برای وقتی که تاریخچه رسمی در دسترس نیست
             val openToday = IranMarket.dayStartMs(IranMarket.todayInt()) + 9 * 3_600_000L
             val seen = tracker.track(pos.assetId).lastOrNull { it.t < openToday && it.t > pos.openedAt }

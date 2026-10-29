@@ -84,8 +84,26 @@ class IranStockTests {
         val seenAt = ms(2026, 10, 13, 12)
         assertEquals(0.5, IranStockSource.intradayAdjustment(null, 0L, 500.0, 10.0, 1000.0, seenAt, now)!!.second, 1e-9)
         assertEquals(null, IranStockSource.intradayAdjustment(null, 0L, 950.0, 10.0, 1000.0, seenAt, now))
+        // پنجشنبه (تعطیل) و قبل از ساعت ۹: دیده‌بان هنوز داده جلسه قبل را دارد → هرگز تعدیل نیست
+        val rowsWed = listOf(DailyRow(20261013, 1000.0, 950.0), DailyRow(20261014, 1050.0, 1000.0))
+        val thu = ms(2026, 10, 15, 0) + 60_000L
+        assertEquals(null, IranStockSource.intradayAdjustment(rowsWed, thu - 30_000L, 1000.0, 10.0, 0.0, 0L, thu))
+        val satEarly = ms(2026, 10, 17, 7)
+        assertEquals(null, IranStockSource.intradayAdjustment(rowsWed, satEarly - 60_000L, 1000.0, 10.0, 1250.0, ms(2026, 10, 14, 20), satEarly))
         // هنوز معامله‌ای نشده
         assertEquals(null, IranStockSource.intradayAdjustment(rows, fresh, 500.0, 0.0, 0.0, 0L, now))
+    }
+
+    @Test
+    fun detectsOffSessionAdjustmentNotes() {
+        val tz = java.util.TimeZone.getTimeZone("Asia/Tehran")
+        val note = "پله دوم خریده شد • تعدیل افزایش سرمایه/تقسیم سود با ضریب 0.952 (2026/10/29 00:00)" +
+            " • تعدیل افزایش سرمایه/تقسیم سود با ضریب 0.970 (2026/10/27 08:10)" +
+            " • تعدیل افزایش سرمایه/تقسیم سود با ضریب 0.500 (2026/10/27 10:05)"
+        val bad = com.saeidkazemi.trader.trading.TradeEngine.offSessionAdjustments(note, tz)
+        assertEquals(2, bad.size)
+        assertEquals(0.952, bad[0].second, 1e-9)
+        assertEquals(0.970, bad[1].second, 1e-9)
     }
 
     @Test

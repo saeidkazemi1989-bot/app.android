@@ -72,6 +72,16 @@ class TradeJournal(private val store: JsonStore?) {
         true
     }
 
+    /** تغییر یک ردیف مشخص (باز یا بسته) با شناسه‌اش. */
+    fun updateById(id: String, change: (JournalEntry) -> JournalEntry): Boolean = synchronized(lock) {
+        val list = ensure()
+        val i = list.indexOfFirst { it.id == id }
+        if (i < 0) return@synchronized false
+        list[i] = change(list[i])
+        save(list)
+        true
+    }
+
     /** تغییر ردیف باز یک دارایی (مثلاً پله دوم خرید). */
     fun update(assetId: String, change: (JournalEntry) -> JournalEntry): Boolean = close(assetId, change)
 

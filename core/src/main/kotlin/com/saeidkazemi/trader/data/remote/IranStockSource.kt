@@ -391,6 +391,10 @@ class IranStockSource {
             if (yesterday <= 0 || trades <= 0) return null
             val today = IranMarket.todayInt(nowMs)
             val openMs = IranMarket.dayStartMs(today) + 9 * 3_600_000L
+            // دیده‌بان بازار قبل از ساعت ۹ و در روزهای تعطیل هنوز داده جلسه قبل را نشان می‌دهد («قیمت دیروز» آن،
+            // قیمت پریروز است)؛ مقایسه‌اش با پایانی دیروز، تغییر قیمت عادی را «تعدیل» جلوه می‌داد (خطای ۱.۱۶.۳).
+            val d = java.time.Instant.ofEpochMilli(nowMs).atZone(IranMarket.ZONE).toLocalDate()
+            if (!IranMarket.isTradingDay(d) || nowMs < openMs) return null
             if (rows != null && rows.isNotEmpty() && rows.last().dEven < today && rows.last().close > 0 &&
                 rowsFetchedAt >= lastSessionSettledMs(nowMs)
             ) {
