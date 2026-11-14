@@ -130,7 +130,7 @@ class StrategyEngine {
         val total = maxOf(0, minOf(100, technical + newsEff + proAdj))
         if (usePro && pro != null && pro.factors.isNotEmpty()) {
             reasons.add("تحلیل تخصصی: اثر " + ProAnalysis.signed(proAdj))
-            pro.factors.filter { it.impact != 0 }.sortedByDescending { kotlin.math.abs(it.impact) }.take(4).forEach { f ->
+            pro.factors.filter { it.impact != 0 && !it.muted }.sortedByDescending { kotlin.math.abs(it.impact) }.take(4).forEach { f ->
                 reasons.add(f.title + " " + f.value + " (" + ProAnalysis.signed(f.impact) + ")")
             }
             if (proBlocked) reasons.add(pro.blockReason ?: "شرایط تخصصی نامناسب؛ خرید متوقف شد")

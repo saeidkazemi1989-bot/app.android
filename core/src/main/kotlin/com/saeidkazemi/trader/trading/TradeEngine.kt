@@ -60,6 +60,8 @@ class TradeEngine(
 ) {
 
     companion object {
+        const val CRYPTO_SHARE_AFTER_CUT = 10.0
+        const val FACTOR_PREFIX = "عامل تخصصی: "
         const val REVERT_MARK = "برگشت تعدیل اشتباه"
 
         private val ADJ_NOTE = Regex("""تعدیل افزایش سرمایه/تقسیم سود با ضریب ([0-9.,]+) \((\d{4}/\d{2}/\d{2} \d{2}:\d{2})\)""")
@@ -1059,6 +1061,72 @@ class TradeEngine(
     }
 
     /**
+     * ۱.۱۷.۰ (با تأیید کاربر): ارز دیجیتال در سه گزارش پشت سر هم زیان‌ده بود و امتیاز بالایش بدتر از بقیه عمل کرد.
+     * یک بار سهمش به ۱۰٪ می‌رسد و باقی به بورس می‌رود (سقف ۶۰٪ هر بازار رعایت می‌شود). خریدهای باز دست نمی‌خورند؛
+     * فقط نقد آزاد جابه‌جا می‌شود. کاربر بعداً می‌تواند از تنظیمات دوباره عوضش کند.
+     */
+    private fun cutCryptoShare(priceMap: Map<String, Double>, notes: MutableList<String>) {
+        val s = store.loadSettings()
+        if (s.cryptoShareCut) return
+        val crypto = s.allocationPct(MarketKind.CRYPTO)
+        if (crypto <= CRYPTO_SHARE_AFTER_CUT) {
+            store.saveSettings(s.copy(cryptoShareCut = true))
+            return
+        }
+        val ir = s.allocationPct(MarketKind.IR_STOCK)
+        val moved = minOf(crypto - CRYPTO_SHARE_AFTER_CUT, maxOf(0.0, s.maxMarketSharePct - ir))
+        if (moved <= 0) {
+            store.saveSettings(s.copy(cryptoShareCut = true))
+            return
+        }
+        val alloc = s.allocations + (MarketKind.CRYPTO.name to crypto - moved) + (MarketKind.IR_STOCK.name to ir + moved)
+        store.saveSettings(s.copy(allocations = alloc, cryptoShareCut = true))
+        broker.reallocate(alloc) { p -> (priceMap[p.assetId] ?: p.avgBuyUsd) * p.qty }
+        notes.add(
+            "سهم ارز دیجیتال از " + Format.trim(crypto, 1) + "٪ به " + Format.trim(crypto - moved, 1) + "٪ رسید و " +
+                Format.trim(moved, 1) + "٪ به بورس رفت (طبق درخواست شما)؛ خریدهای باز دست نخوردند."
+        )
+    }
+
+    @Volatile
+    private var mutedCheckedAt = 0L
+
+    /**
+     * عوامل تحلیل تخصصی که در عمل برعکس جواب داده‌اند (با تأیید کاربر): هر ۶ ساعت از پیش‌بینی‌های ثبت‌شده،
+     * برای هر بازار جدا، عاملی با نتیجه «غلط» غیرفعال و عامل غیرفعالی که حالا «درست» جواب داده دوباره فعال می‌شود.
+     */
+    private fun updateMutedFactors(notes: MutableList<String>) {
+        val now = System.currentTimeMillis()
+        if (now - mutedCheckedAt < 6 * 3_600_000L) return
+        val rl = review ?: return
+        mutedCheckedAt = now
+        val preds = rl.predictions()
+        val s = store.loadSettings()
+        val muted = LinkedHashSet(s.mutedFactors)
+        val added = ArrayList<String>()
+        val removed = ArrayList<String>()
+        for (m in listOf(MarketKind.CRYPTO, MarketKind.IR_STOCK)) {
+            val stats = com.saeidkazemi.trader.review.SelfReview.factors(
+                com.saeidkazemi.trader.review.SelfReview.evaluate(preds.filter { it.market == m.name })
+            )
+            for (fs in stats) {
+                if (!fs.name.startsWith(FACTOR_PREFIX)) continue
+                val key = m.name + ":" + fs.name.removePrefix(FACTOR_PREFIX)
+                when (fs.verdict) {
+                    "غلط" -> if (muted.add(key)) added.add(key)
+                    "درست" -> if (muted.remove(key)) removed.add(key)
+                }
+            }
+        }
+        if (added.isEmpty() && removed.isEmpty()) return
+        store.saveSettings(store.loadSettings().copy(mutedFactors = muted.toList()))
+        ProAnalysis.mutedTitles = muted
+        fun label(k: String) = k.substringAfter(":") + " (" + (MarketKind.values().firstOrNull { it.name == k.substringBefore(":") }?.faTitle ?: "") + ")"
+        if (added.isNotEmpty()) notes.add("عامل‌هایی که در عمل برعکس جواب دادند غیرفعال شدند: " + added.joinToString("، ") { label(it) } + ".")
+        if (removed.isNotEmpty()) notes.add("عامل‌هایی که دوباره درست جواب دادند فعال شدند: " + removed.joinToString("، ") { label(it) } + ".")
+    }
+
+    /**
      * نسخه ۱.۶: بازار «طلا و دلار» اضافه شد. برای کاربران قبلی سهم فارکس (که فقط شبیه‌سازی بود) به طلا و دلار
      * منتقل می‌شود؛ حساب از نو ساخته نمی‌شود و سود/زیان قبلی حفظ می‌شود.
      */
@@ -1227,6 +1295,8 @@ class TradeEngine(
             notes.add("بازار بورس الان بسته است؛ سهام تحلیل می‌شوند ولی خرید و فروش آن‌ها فقط در ساعت کار بازار (شنبه تا چهارشنبه ۹ تا ۱۲:۳۰) انجام می‌شود.")
         }
         val usdIrr = market.usdIrr(settings)
+
+        ProAnalysis.mutedTitles = settings.mutedFactors.toSet()
 
         // ۱) تحلیل تکنیکال همه دارایی‌های دارای داده کافی
         val histories = HashMap<String, List<PricePoint>>()
@@ -1580,6 +1650,11 @@ class TradeEngine(
             }
         }
 
+        if (manage) try {
+            cutCryptoShare(priceMap, notes)
+        } catch (_: Exception) {
+        }
+
         // ۷) خرید خودکار — هر بازار جدا و فقط با سرمایه اختصاصی خودش (بدون تأیید موردی)
         val activity = ArrayList<MarketActivity>()
         if (settings.autoTrade && manage) {
@@ -1772,6 +1847,10 @@ class TradeEngine(
         }
         tracker.record(broker.account().positions, priceMap)
         if (manage) maybeStartBacktest()
+        if (manage) try {
+            updateMutedFactors(notes)
+        } catch (_: Exception) {
+        }
         val rl = review
         if (manage && rl != null) {
             try {

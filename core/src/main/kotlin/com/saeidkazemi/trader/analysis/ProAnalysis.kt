@@ -89,9 +89,23 @@ object ProAnalysis {
         }
     }
 
-    private fun result(factors: List<ProFactor>, block: String?): Result {
-        val raw = factors.sumOf { it.impact }
-        return Result(raw.coerceIn(-MAX_ADJ, MAX_ADJ), factors, block != null, block)
+    /**
+     * عوامل غیرفعال («بازار:عنوان»، مثل CRYPTO:قدرت نسبی در برابر بیت‌کوین) که موتور از تنظیمات می‌گذارد.
+     * اثرشان در امتیاز حساب نمی‌شود ولی در عامل‌ها می‌ماند تا سنجش درستی‌شان ادامه پیدا کند.
+     */
+    @Volatile
+    var mutedTitles: Set<String> = emptySet()
+
+    const val MUTED_NOTE = "غیرفعال: در عمل برعکس جواب داده"
+
+    private fun result(factors: List<ProFactor>, block: String?, market: String): Result {
+        val muted = mutedTitles
+        val fs = factors.map { f ->
+            if (f.impact != 0 && (market + ":" + f.title) in muted) f.copy(muted = true, note = listOf(f.note, MUTED_NOTE).filter { it.isNotEmpty() }.joinToString(" — "))
+            else f
+        }
+        val raw = fs.filter { !it.muted }.sumOf { it.impact }
+        return Result(raw.coerceIn(-MAX_ADJ, MAX_ADJ), fs, block != null, block)
     }
 
     // ------------------------------------------------------------------ بورس تهران
@@ -221,7 +235,7 @@ object ProAnalysis {
                 block = "ریزش فراگیر بازار (فقط " + Format.num(breadth * 100, 0) + "٪ نمادها مثبت)؛ خرید جدید سهام متوقف شد"
             }
         }
-        return result(f, block)
+        return result(f, block, "IR_STOCK")
     }
 
     // ------------------------------------------------------------------ ارز دیجیتال
@@ -310,7 +324,7 @@ object ProAnalysis {
                 if (bs >= 0.58) "سفارش خرید نزدیک قیمت بیشتر است" else if (bs <= 0.42) "سفارش فروش سنگین‌تر است" else ""
             )
         }
-        return result(f, block)
+        return result(f, block, "CRYPTO")
     }
 
     /**

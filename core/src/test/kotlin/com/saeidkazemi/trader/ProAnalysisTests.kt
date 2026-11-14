@@ -135,6 +135,27 @@ class ProAnalysisTests {
     }
 
     @Test
+    fun mutedFactorIsShownButNotCounted() {
+        val hist = trend(120, 0.8)
+        val inp = ProAnalysis.CryptoInputs(fearGreed = 15, fearGreedLabel = "ترس شدید", btcHistory = trend(120, 0.3), bidShare = 0.72)
+        val before = ProAnalysis.mutedTitles
+        try {
+            ProAnalysis.mutedTitles = emptySet()
+            val normal = ProAnalysis.crypto(hist, inp)
+            ProAnalysis.mutedTitles = setOf("CRYPTO:قدرت نسبی در برابر بیت‌کوین")
+            val muted = ProAnalysis.crypto(hist, inp)
+            val rs = muted.factors.first { it.title.contains("قدرت نسبی") }
+            assertTrue(rs.muted && rs.impact > 0)
+            assertEquals(normal.adj - rs.impact, muted.adj)
+            // عامل همنام در بازار دیگر غیرفعال نمی‌شود
+            ProAnalysis.mutedTitles = setOf("IR_STOCK:قدرت نسبی در برابر بیت‌کوین")
+            assertEquals(normal.adj, ProAnalysis.crypto(hist, inp).adj)
+        } finally {
+            ProAnalysis.mutedTitles = before
+        }
+    }
+
+    @Test
     fun btcDowntrendBlocksAltcoins() {
         val r = ProAnalysis.crypto(
             trend(120, -0.2),

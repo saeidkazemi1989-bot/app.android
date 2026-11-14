@@ -49,7 +49,9 @@ data class ProFactor(
     val title: String,
     val value: String,
     val impact: Int,
-    val note: String = ""
+    val note: String = "",
+    /** عاملی که در عمل برعکس جواب داده و موقتاً در امتیاز حساب نمی‌شود (اثرش فقط برای سنجش ثبت می‌شود). */
+    val muted: Boolean = false
 )
 
 enum class Action(val faTitle: String) { BUY("خرید"), SELL("فروش"), HOLD("نگهداری") }
@@ -253,6 +255,13 @@ data class AppSettings(
      * است (مثلاً بعد از افزایش سرمایه)، خرید تازه انجام می‌شود (حداکثر دو برابر سقف). درخواست کاربر.
      */
     val extraPositions: Boolean = true,
+    /**
+     * عوامل تحلیل تخصصی غیرفعال («بازار:عنوان»)، چون در عمل برعکس جواب داده‌اند (با تأیید کاربر، ۱.۱۷.۰).
+     * برنامه خودش با داده‌های ثبت‌شده عامل «غلط» را اضافه و عاملی را که دوباره درست جواب دهد حذف می‌کند.
+     */
+    val mutedFactors: List<String> = listOf("CRYPTO:قدرت نسبی در برابر بیت‌کوین"),
+    /** کاهش یک‌باره سهم ارز دیجیتال به ۱۰٪ و انتقال باقی به بورس (درخواست کاربر، ۱.۱۷.۰) انجام شده؟ */
+    val cryptoShareCut: Boolean = false,
     /** تعداد خرید همزمان دستی هر بازار (جای پیش‌فرض سطح ریسک)؛ نبودن کلید = پیش‌فرض. */
     val maxPositionsByMarket: Map<String, Int>? = null,
     /** حجم هر خرید دستی هر بازار (درصد از سرمایه همان بازار)؛ نبودن کلید = پیش‌فرض. */

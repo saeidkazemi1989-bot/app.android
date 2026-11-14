@@ -244,6 +244,9 @@ object ReviewReport {
             val manual = settings.maxPositionsByMarket?.containsKey(m.name) == true || settings.positionPctByMarket?.containsKey(m.name) == true
             m.faTitle + " " + pl.maxPositions + " خرید × " + f(pl.positionPct * 100, 0) + "٪" + (if (manual) " (دستی)" else "")
         } + " • موقعیت اضافه با نقد آزاد: " + (if (settings.extraPositions) "روشن" else "خاموش"))
+        line("عوامل غیرفعال (در عمل برعکس جواب دادند): " + settings.mutedFactors.ifEmpty { listOf("ندارد") }.joinToString("، ") { k ->
+            k.substringAfter(":") + (com.saeidkazemi.trader.data.model.MarketKind.values().firstOrNull { it.name == k.substringBefore(":") }?.let { " (" + it.faTitle + ")" } ?: "")
+        } + " • سهم سرمایه: " + com.saeidkazemi.trader.data.model.MarketKind.TRADED.joinToString("، ") { m -> m.faTitle + " " + f(settings.allocationPct(m), 0) + "٪" })
         line("افزودن به خرید قبلی: " + (if (!settings.topUpWinners) "خاموش" else if (settings.topUpSmart) "روشن (جز جایی که آزمون نشان دهد ضرر دارد)" else "روشن (همه بازارها)"))
         for (m in com.saeidkazemi.trader.data.model.MarketKind.TRADED) {
             val w = bt?.topUpWhy?.get(m.name) ?: continue
