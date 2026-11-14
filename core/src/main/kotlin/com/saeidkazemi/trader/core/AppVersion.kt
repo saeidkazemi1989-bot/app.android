@@ -2,8 +2,8 @@ package com.saeidkazemi.trader.core
 
 /** نسخه برنامه (هم‌زمان با versionName/versionCode اندروید و appVersion ویندوز به‌روز شود). */
 object AppVersion {
-    const val NAME = "1.16.4"
+    const val NAME = "1.16.5"
 
     /** شماره نسخه برای مقایسه در به‌روزرسانی داخل برنامه (همان versionCode اندروید). */
-    const val CODE = 39
+    const val CODE = 40
 }

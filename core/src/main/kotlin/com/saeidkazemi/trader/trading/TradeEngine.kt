@@ -1460,6 +1460,12 @@ class TradeEngine(
         }
 
         // ۶) مدیریت ریسک و فروش موقعیت‌های باز
+        // خریدهایی که در حالت «خرید در اصلاح» (بدون نیاز به امتیاز بالا) انجام شده‌اند: امتیاز پایین برای آن‌ها
+        // نشانه فروش نیست. قبلاً اگر بک‌تست فردا به حالت معمولی برمی‌گشت، همه را به‌خاطر «ضعیف شدن سیگنال» می‌فروخت
+        // (۷ ارز دیجیتال با امتیاز ۱۲ تا ۲۰ در ۸ آبان/نوامبر خریده و ۲۴ ساعت بعد با زیان فروخته شدند).
+        val dipEntries: Set<String> = if (manage) journal.all()
+            .filter { it.isOpen && it.score != null && it.threshold != null && it.score < it.threshold }
+            .map { it.assetId }.toSet() else emptySet()
         for (pos in if (manage) broker.account().positions else emptyList()) {
             val asset = assetMap[pos.assetId] ?: continue
             val curUsd = priceMap[asset.id] ?: continue
@@ -1489,7 +1495,8 @@ class TradeEngine(
                         sig.score < settings.buyThreshold + planFor(settings, pos.market).buyThresholdDelta) ->
                     "خروج به‌خاطر خبر منفی مهم"
                 sig != null && sig.proBlocked && sig.score < settings.buyThreshold - 10 -> "خروج به‌خاطر شرایط تخصصی: " + (sig.proBlockReason ?: "")
-                sig != null && sig.score <= settings.sellThreshold && planFor(settings, pos.market).entryMode == 0 -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
+                sig != null && sig.score <= settings.sellThreshold && planFor(settings, pos.market).entryMode == 0 &&
+                    pos.assetId !in dipEntries -> "ضعیف شدن سیگنال (امتیاز " + sig.score + ")"
                 else -> null
             }
             val belowStop = curUsd <= pos.stopLossUsd
